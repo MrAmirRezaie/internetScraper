@@ -3,15 +3,20 @@ import csv
 import json
 import logging
 import os
+import platform
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.firefox.service import Service as FirefoxService
+from selenium.webdriver.edge.service import Service as EdgeService
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from openpyxl import Workbook
+from fpdf import FPDF
+import xml.etree.ElementTree as ET
 
 logging.basicConfig(
     filename='internet_scraper.log',
@@ -19,34 +24,77 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-CHROME_DRIVER_PATH = 'C:/Path/To/chromedriver.exe'
+# Determine the operating system
+os_type = platform.system()
+
+# Set driver paths based on the operating system
+if os_type == "Windows":
+    CHROME_DRIVER_PATH = 'C:/Path/To/chromedriver.exe'
+    FIREFOX_DRIVER_PATH = 'C:/Path/To/geckodriver.exe'
+    EDGE_DRIVER_PATH = 'C:/Path/To/msedgedriver.exe'
+elif os_type == "Linux":
+    CHROME_DRIVER_PATH = '/usr/local/bin/chromedriver'
+    FIREFOX_DRIVER_PATH = '/usr/local/bin/geckodriver'
+    EDGE_DRIVER_PATH = '/usr/local/bin/msedgedriver'
+elif os_type == "Darwin":  # macOS
+    CHROME_DRIVER_PATH = '/usr/local/bin/chromedriver'
+    FIREFOX_DRIVER_PATH = '/usr/local/bin/geckodriver'
+    EDGE_DRIVER_PATH = '/usr/local/bin/msedgedriver'
+else:
+    raise Exception("Unsupported operating system")
+
 TELEGRAM_WEB_URL = 'https://web.telegram.org/'
 TWITTER_URL = 'https://twitter.com/'
 INSTAGRAM_URL = 'https://www.instagram.com/'
 FACEBOOK_URL = 'https://www.facebook.com/'
+LINKEDIN_URL = 'https://www.linkedin.com/'
+REDDIT_URL = 'https://www.reddit.com/'
+YOUTUBE_URL = 'https://www.youtube.com/'
 GOOGLE_SEARCH_URL = 'https://www.google.com/search?q='
-output_folder = 'C:/Path/To/Output'
+output_folder = os.path.join(os.path.expanduser('~'), 'InternetScraperOutput')
 
 def get_user_input():
     usernames = input("Enter the usernames or IDs of the target users (comma-separated): ").strip().split(',')
     phone_number = input("Enter your phone number for Telegram login: ")
-    platforms = input("Enter platforms to search (comma-separated, e.g., Telegram,Twitter,Instagram): ").strip().split(',')
+    platforms = input("Enter platforms to search (comma-separated, e.g., Telegram,Twitter,Instagram,LinkedIn,Reddit,YouTube): ").strip().split(',')
     keywords = input("Enter keywords to filter results (comma-separated, leave blank for no filter): ").strip().split(',')
     start_date = input("Enter start date (YYYY-MM-DD, leave blank for no filter): ").strip()
     end_date = input("Enter end date (YYYY-MM-DD, leave blank for no filter): ").strip()
     max_results = input("Enter maximum number of results per platform (leave blank for no limit): ").strip()
     max_results = int(max_results) if max_results else None
-    save_formats = input("Enter formats to save (comma-separated, e.g., txt,csv,json,html,xlsx): ").strip().split(',')
-    return usernames, phone_number, platforms, keywords, start_date, end_date, max_results, save_formats
+    save_formats = input("Enter formats to save (comma-separated, e.g., txt,csv,json,html,xlsx,pdf,xml): ").strip().split(',')
+    browser = input("Enter browser to use (chrome, firefox, edge): ").strip().lower()
+    use_proxy = input("Use proxy? (yes/no): ").strip().lower() == 'yes'
+    proxy = None
+    if use_proxy:
+        proxy = input("Enter proxy address (e.g., http://proxy.example.com:8080): ").strip()
+    return usernames, phone_number, platforms, keywords, start_date, end_date, max_results, save_formats, browser, proxy
 
-def setup_driver():
-    service = Service(CHROME_DRIVER_PATH)
-    options = webdriver.ChromeOptions()
-    options.add_argument('--headless')
-    options.add_argument('--disable-gpu')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    driver = webdriver.Chrome(service=service, options=options)
+def setup_driver(browser, proxy=None):
+    if browser == 'firefox':
+        service = FirefoxService(FIREFOX_DRIVER_PATH)
+        options = webdriver.FirefoxOptions()
+        if proxy:
+            options.set_preference('network.proxy.type', 1)
+            options.set_preference('network.proxy.http', proxy)
+            options.set_preference('network.proxy.http_port', 8080)
+        driver = webdriver.Firefox(service=service, options=options)
+    elif browser == 'edge':
+        service = EdgeService(EDGE_DRIVER_PATH)
+        options = webdriver.EdgeOptions()
+        if proxy:
+            options.add_argument(f'--proxy-server={proxy}')
+        driver = webdriver.Edge(service=service, options=options)
+    else:
+        service = ChromeService(CHROME_DRIVER_PATH)
+        options = webdriver.ChromeOptions()
+        if proxy:
+            options.add_argument(f'--proxy-server={proxy}')
+        options.add_argument('--headless')
+        options.add_argument('--disable-gpu')
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        driver = webdriver.Chrome(service=service, options=options)
     return driver
 
 def login_to_telegram(driver, phone_number):
@@ -138,7 +186,7 @@ def search_telegram(driver, username, keywords, start_date, end_date, max_result
 
 def search_twitter(username, keywords, start_date, end_date, max_results):
     try:
-        driver = setup_driver()
+        driver = setup_driver(browser)
         driver.get(f"{TWITTER_URL}{username}")
         time.sleep(5)
         tweets = []
@@ -185,7 +233,7 @@ def search_twitter(username, keywords, start_date, end_date, max_results):
 
 def search_instagram(username, keywords, start_date, end_date, max_results):
     try:
-        driver = setup_driver()
+        driver = setup_driver(browser)
         driver.get(f"{INSTAGRAM_URL}{username}")
         time.sleep(5)
         posts = []
@@ -231,7 +279,7 @@ def search_instagram(username, keywords, start_date, end_date, max_results):
 
 def search_facebook(username, keywords, start_date, end_date, max_results):
     try:
-        driver = setup_driver()
+        driver = setup_driver(browser)
         driver.get(f"{FACEBOOK_URL}{username}")
         time.sleep(5)
         posts = []
@@ -274,9 +322,145 @@ def search_facebook(username, keywords, start_date, end_date, max_results):
     finally:
         driver.quit()
 
+def search_linkedin(username, keywords, start_date, end_date, max_results):
+    try:
+        driver = setup_driver(browser)
+        driver.get(f"{LINKEDIN_URL}{username}")
+        time.sleep(5)
+        posts = []
+        post_elements = driver.find_elements(By.XPATH, '//div[@class="feed-shared-update-v2"]')
+        for element in post_elements:
+            try:
+                text = element.find_element(By.XPATH, './/div[@class="feed-shared-update-v2__description"]').text
+                post_date = datetime.now()
+
+                if start_date and end_date:
+                    start = datetime.strptime(start_date, '%Y-%m-%d')
+                    end = datetime.strptime(end_date, '%Y-%m-%d')
+                    if not (start <= post_date <= end):
+                        continue
+
+                if keywords:
+                    if not any(keyword.lower() in text.lower() for keyword in keywords):
+                        continue
+
+                posts.append({
+                    'platform': 'LinkedIn',
+                    'username': username,
+                    'content': text,
+                    'content_type': 'post',
+                    'date': post_date.strftime('%Y-%m-%d %H:%M:%S'),
+                    'url': f"{LINKEDIN_URL}{username}"
+                })
+
+                if max_results and len(posts) >= max_results:
+                    break
+
+            except NoSuchElementException as e:
+                logging.warning(f"Error extracting post: {e}")
+
+        logging.info(f"Extracted {len(posts)} posts from LinkedIn for user {username}.")
+        return posts
+    except Exception as e:
+        logging.error(f"Error searching LinkedIn for user {username}: {e}")
+        return []
+    finally:
+        driver.quit()
+
+def search_reddit(username, keywords, start_date, end_date, max_results):
+    try:
+        driver = setup_driver(browser)
+        driver.get(f"{REDDIT_URL}{username}")
+        time.sleep(5)
+        posts = []
+        post_elements = driver.find_elements(By.XPATH, '//div[@class="Post"]')
+        for element in post_elements:
+            try:
+                text = element.find_element(By.XPATH, './/h3[@class="_eYtD2XCVieq6emjKBH3m"]').text
+                post_date = datetime.now()
+
+                if start_date and end_date:
+                    start = datetime.strptime(start_date, '%Y-%m-%d')
+                    end = datetime.strptime(end_date, '%Y-%m-%d')
+                    if not (start <= post_date <= end):
+                        continue
+
+                if keywords:
+                    if not any(keyword.lower() in text.lower() for keyword in keywords):
+                        continue
+
+                posts.append({
+                    'platform': 'Reddit',
+                    'username': username,
+                    'content': text,
+                    'content_type': 'post',
+                    'date': post_date.strftime('%Y-%m-%d %H:%M:%S'),
+                    'url': f"{REDDIT_URL}{username}"
+                })
+
+                if max_results and len(posts) >= max_results:
+                    break
+
+            except NoSuchElementException as e:
+                logging.warning(f"Error extracting post: {e}")
+
+        logging.info(f"Extracted {len(posts)} posts from Reddit for user {username}.")
+        return posts
+    except Exception as e:
+        logging.error(f"Error searching Reddit for user {username}: {e}")
+        return []
+    finally:
+        driver.quit()
+
+def search_youtube(username, keywords, start_date, end_date, max_results):
+    try:
+        driver = setup_driver(browser)
+        driver.get(f"{YOUTUBE_URL}{username}")
+        time.sleep(5)
+        videos = []
+        video_elements = driver.find_elements(By.XPATH, '//div[@id="dismissible"]')
+        for element in video_elements:
+            try:
+                title = element.find_element(By.XPATH, './/a[@id="video-title"]').text
+                video_url = element.find_element(By.XPATH, './/a[@id="video-title"]').get_attribute('href')
+                video_date = datetime.now()
+
+                if start_date and end_date:
+                    start = datetime.strptime(start_date, '%Y-%m-%d')
+                    end = datetime.strptime(end_date, '%Y-%m-%d')
+                    if not (start <= video_date <= end):
+                        continue
+
+                if keywords:
+                    if not any(keyword.lower() in title.lower() for keyword in keywords):
+                        continue
+
+                videos.append({
+                    'platform': 'YouTube',
+                    'username': username,
+                    'content': title,
+                    'content_type': 'video',
+                    'date': video_date.strftime('%Y-%m-%d %H:%M:%S'),
+                    'url': video_url
+                })
+
+                if max_results and len(videos) >= max_results:
+                    break
+
+            except NoSuchElementException as e:
+                logging.warning(f"Error extracting video: {e}")
+
+        logging.info(f"Extracted {len(videos)} videos from YouTube for user {username}.")
+        return videos
+    except Exception as e:
+        logging.error(f"Error searching YouTube for user {username}: {e}")
+        return []
+    finally:
+        driver.quit()
+
 def search_google(username, keywords, start_date, end_date, max_results):
     try:
-        driver = setup_driver()
+        driver = setup_driver(browser)
         driver.get(f"{GOOGLE_SEARCH_URL}{username}")
         time.sleep(5)
         results = []
@@ -372,9 +556,40 @@ def save_to_excel(data, username):
         ws.append([item['platform'], item['username'], item['content'], item['content_type'], item['date'], item['url']])
     wb.save(os.path.join(user_folder, f"{username}.xlsx"))
 
+def save_to_pdf(data, username):
+    user_folder = os.path.join(output_folder, username)
+    os.makedirs(user_folder, exist_ok=True)
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    for item in data:
+        pdf.cell(200, 10, txt=f"Platform: {item['platform']}", ln=True)
+        pdf.cell(200, 10, txt=f"Username: {item['username']}", ln=True)
+        pdf.cell(200, 10, txt=f"Content: {item['content']}", ln=True)
+        pdf.cell(200, 10, txt=f"Type: {item['content_type']}", ln=True)
+        pdf.cell(200, 10, txt=f"Date: {item['date']}", ln=True)
+        pdf.cell(200, 10, txt=f"URL: {item['url']}", ln=True)
+        pdf.cell(200, 10, txt="=" * 50, ln=True)
+    pdf.output(os.path.join(user_folder, f"{username}.pdf"))
+
+def save_to_xml(data, username):
+    user_folder = os.path.join(output_folder, username)
+    os.makedirs(user_folder, exist_ok=True)
+    root = ET.Element("data")
+    for item in data:
+        entry = ET.SubElement(root, "entry")
+        ET.SubElement(entry, "platform").text = item['platform']
+        ET.SubElement(entry, "username").text = item['username']
+        ET.SubElement(entry, "content").text = item['content']
+        ET.SubElement(entry, "type").text = item['content_type']
+        ET.SubElement(entry, "date").text = item['date']
+        ET.SubElement(entry, "url").text = item['url']
+    tree = ET.ElementTree(root)
+    tree.write(os.path.join(user_folder, f"{username}.xml"), encoding='utf-8', xml_declaration=True)
+
 if __name__ == '__main__':
-    usernames, phone_number, platforms, keywords, start_date, end_date, max_results, save_formats = get_user_input()
-    driver = setup_driver()
+    usernames, phone_number, platforms, keywords, start_date, end_date, max_results, save_formats, browser, proxy = get_user_input()
+    driver = setup_driver(browser, proxy)
     try:
         login_to_telegram(driver, phone_number)
         for username in usernames:
@@ -387,6 +602,12 @@ if __name__ == '__main__':
                 all_data.extend(search_instagram(username, keywords, start_date, end_date, max_results))
             if 'Facebook' in platforms:
                 all_data.extend(search_facebook(username, keywords, start_date, end_date, max_results))
+            if 'LinkedIn' in platforms:
+                all_data.extend(search_linkedin(username, keywords, start_date, end_date, max_results))
+            if 'Reddit' in platforms:
+                all_data.extend(search_reddit(username, keywords, start_date, end_date, max_results))
+            if 'YouTube' in platforms:
+                all_data.extend(search_youtube(username, keywords, start_date, end_date, max_results))
             if 'Google' in platforms:
                 all_data.extend(search_google(username, keywords, start_date, end_date, max_results))
             if 'txt' in save_formats:
@@ -399,5 +620,9 @@ if __name__ == '__main__':
                 save_to_html(all_data, username)
             if 'xlsx' in save_formats:
                 save_to_excel(all_data, username)
+            if 'pdf' in save_formats:
+                save_to_pdf(all_data, username)
+            if 'xml' in save_formats:
+                save_to_xml(all_data, username)
     finally:
         driver.quit()
