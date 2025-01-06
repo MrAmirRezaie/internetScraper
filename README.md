@@ -23,6 +23,7 @@ This project consists of two main components: an **Internet Scraper** and an **A
    - [Overview](#overview-1)
    - [Features](#features-1)
    - [Usage](#usage-1)
+   - [Command-Line Arguments](#command-line-arguments)
    - [Multi-Stage Encryption](#multi-stage-encryption)
    - [Admin Code Management](#admin-code-management)
    - [Admin Menu](#admin-menu)
@@ -185,11 +186,24 @@ The Admin Environment is a Python-based tool designed to generate and verify adm
 - **Access Control**: Restrict access to sensitive operations using admin codes.
 
 ### Usage
-1. Run the `admin_environment.py` script.
+1. To run the Internet Scraper, use the following command:
+   ```bash
+   python internetScraper.py -U user1,user2 -K keyword1,keyword2 -S 2023-01-01 -E 2023-12-31 -M 100 -F txt,csv,json
+   ```
+      - This command will scrape data for user1 and user2 using keyword1 and keyword2, filter results between 2023-01-01 and 2023-12-31, and save the results in TXT, CSV, and JSON formats.
 2. Choose to generate or verify an admin code.
    - **Generate Admin Code**: Enter the admin username, and the script will generate and save the encrypted admin code.
    - **Verify Admin Code**: Enter the admin username, and the script will verify the encrypted admin code.
 3. The script will display the results of the operation.
+
+### Command Line Arguments
+   - `-U, --usernames`: Comma-separated list of usernames or IDs to scrape.
+   - `-K, --keywords`: Comma-separated list of keywords to filter results.
+   - `-S, --start_date`: Start date for filtering results (format: YYYY-MM-DD).
+   - `-E, --end_date`: End date for filtering results (format: YYYY-MM-DD).
+   - `-M, --max_results`: Maximum number of results to retrieve per platform.
+   - `-F, --save_formats`: Comma-separated list of formats to save (e.g., txt, csv, json, html, xlsx).
+   - `-P, --proxy`: Proxy server address or path to a text file containing proxies.
 
 ### Multi-Stage Encryption
 The Admin Environment uses the same multi-stage encryption process as the Internet Scraper. The encryption process involves three algorithms:
