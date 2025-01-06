@@ -374,17 +374,18 @@ Access to the Admin Environment is restricted to authorized users. Admin codes a
 - The scraper includes mechanisms to ensure data integrity, such as checksums and data validation.
 
 ## Troubleshooting
-1. Common Issues
+
+### Common Issues
    - **ChromeDriver Issues**: Ensure that the ChromeDriver executable matches your Chrome browser version.
    - **Missing Packages**: Run `pip install -r requirements.txt` to install all required packages.
    - **Log Files**: Check the log files (`internet_scraper.log` and `admin_environment.log`) for detailed error messages.
 
-2. Debugging Tips
+### Debugging Tips
    - Run the script in non-headless mode to see the browser actions.
    - Check the log files for detailed error messages.
    - Ensure that all environment variables are correctly set in the `.env` file.
 
-3. Frequently Asked Questions (FAQ)
+### Frequently Asked Questions (FAQ)
    - **Q: How do I update ChromeDriver?**
          - A: Download the latest version of ChromeDriver from the official website and replace the existing executable.
    - **Q: Can I scrape data from private accounts?**
