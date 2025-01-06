@@ -416,8 +416,8 @@ Access to the Admin Environment is restricted to authorized users. Admin codes a
 ## Contact
 
    - For questions or feedback, please contact:
-   - Name: Mr Amir Rezaie
-   - Email: MrAmirRezaie70@gmail.com
-   - Github: MrAmirRezaie
+      - Name: Mr Amir Rezaie
+      - Email: MrAmirRezaie70@gmail.com
+      - Github: MrAmirRezaie
 
 ## **Enjoy using the Internet Scraper script! 🚀**
