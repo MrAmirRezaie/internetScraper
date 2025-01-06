@@ -392,14 +392,17 @@ Access to the Admin Environment is restricted to authorized users. Admin codes a
    - **Q: How do I change the output folder?**
          - A: Update the `OUTPUT_FOLDER` environment variable in the `.env` file.
 
+## License
+   - This project is licensed under the MIT License.
+
+## Contributing
+   - Contributions are welcome! Please open an issue or submit a pull request for any improvements or bug fixes
+
 ## Contact
 
    - For questions or feedback, please contact:
    - Name: Mr Amir Rezaie
    - Email: MrAmirRezaie70@gmail.com
    - Github: MrAmirRezaie
-
-## Contributing
-   - Contributions are welcome! Please open an issue or submit a pull request for any improvements or bug fixes
 
 ## **Enjoy using the Internet Scraper script! 🚀**
