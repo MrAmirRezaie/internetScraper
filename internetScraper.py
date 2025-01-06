@@ -28,9 +28,9 @@ import pytesseract
 from PIL import Image
 import pandas as pd
 from Crypto.Random import get_random_bytes
+import argparse
 
 # Load environment variables from .env file
-
 load_dotenv()
 
 # Logging configuration to track the script's execution and errors
@@ -190,24 +190,17 @@ def process_file(file_path):
         logging.error(f"Unsupported file format: {file_path}")
         return None
 
-def get_user_input():
-    """Get user inputs for the search parameters."""
+def read_proxy_list(file_path):
+    """Read a list of proxies from a text file."""
     try:
-        usernames = input("Enter the usernames or IDs of the target users (comma-separated): ").strip().split(',')
-        phone_number = input("Enter your phone number for Telegram login: ")
-        platforms = input("Enter platforms to search (comma-separated, e.g., Telegram,Twitter,Instagram): ").strip().split(',')
-        keywords = input("Enter keywords to filter results (comma-separated, leave blank for no filter): ").strip().split(',')
-        start_date = input("Enter start date (YYYY-MM-DD, leave blank for no filter): ").strip()
-        end_date = input("Enter end date (YYYY-MM-DD, leave blank for no filter): ").strip()
-        max_results = input("Enter maximum number of results per platform (leave blank for no limit): ").strip()
-        max_results = int(max_results) if max_results else None
-        save_formats = input("Enter formats to save (comma-separated, e.g., txt,csv,json,html,xlsx): ").strip().split(',')
-        return usernames, phone_number, platforms, keywords, start_date, end_date, max_results, save_formats
+        with open(file_path, 'r', encoding='utf-8') as f:
+            proxies = f.read().splitlines()
+        return proxies
     except Exception as e:
-        logging.error(f"Error getting user input: {e}")
-        raise
+        logging.error(f"Error reading proxy list from file: {e}")
+        return []
 
-def setup_driver():
+def setup_driver(proxy=None):
     """Set up and configure the Selenium WebDriver for mobile."""
     try:
         service = Service(CHROME_DRIVER_PATH)
@@ -220,6 +213,9 @@ def setup_driver():
         )
         options.add_argument(f'user-agent={mobile_user_agent}')
 
+        if proxy:
+            options.add_argument(f'--proxy-server={proxy}')
+
         if os.getenv('HEADLESS', 'true').lower() == 'true':
             options.add_argument('--headless')  # Run in headless mode
         options.add_argument('--disable-gpu')
@@ -228,7 +224,7 @@ def setup_driver():
         driver = webdriver.Chrome(service=service, options=options)
 
         # Set window size for mobile
-        driver.set_window_size(375, 812)  # اندازه صفحه iPhone X
+        driver.set_window_size(375, 812)  # iPhone X screen size
         return driver
     except Exception as e:
         logging.error(f"Error setting up WebDriver: {e}")
@@ -515,8 +511,8 @@ def search_google(username, keywords, start_date, end_date, max_results):
     finally:
         driver.quit()
 
-def save_to_database(data, username):
-    """Save data to the SQLite database."""
+def initialize_database():
+    """Initialize the SQLite database and create the necessary tables."""
     try:
         conn = sqlite3.connect(DATABASE_FILE)
         cursor = conn.cursor()
@@ -533,6 +529,19 @@ def save_to_database(data, username):
                 url TEXT
             )
         ''')
+
+        conn.commit()
+        conn.close()
+        logging.info("Database initialized successfully.")
+    except Exception as e:
+        logging.error(f"Error initializing database: {e}")
+        raise
+
+def save_to_database(data, username):
+    """Save data to the SQLite database."""
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
 
         # Insert data into the table using parameterized queries
         for item in data:
@@ -918,10 +927,36 @@ def admin_menu():
         logging.error(f"Error in admin menu: {e}")
         raise
 
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="Internet Scraper Tool")
+    parser.add_argument('-P', '--proxy', help="Proxy server address or path to a text file containing proxies (e.g., http://proxy.example.com:8080 or proxies.txt)")
+    parser.add_argument('-K', '--keywords', help="Keywords to filter results (comma-separated)")
+    parser.add_argument('-U', '--usernames', help="Usernames or IDs of the target users (comma-separated)")
+    parser.add_argument('-S', '--start_date', help="Start date for filtering results (YYYY-MM-DD)")
+    parser.add_argument('-E', '--end_date', help="End date for filtering results (YYYY-MM-DD)")
+    parser.add_argument('-M', '--max_results', type=int, help="Maximum number of results per platform")
+    parser.add_argument('-F', '--save_formats', help="Formats to save (comma-separated, e.g., txt,csv,json,html,xlsx)")
+    parser.add_argument('--help', action='help', help="Show this help message and exit")
+    return parser.parse_args()
+
+def get_proxies(proxy_input):
+    """Get a list of proxies from the input."""
+    if proxy_input.endswith('.txt'):
+        return read_proxy_list(proxy_input)
+    else:
+        return [proxy_input]
+
 if __name__ == '__main__':
     try:
+        # Parse command line arguments
+        args = parse_arguments()
+
         # Install required packages
         install_packages()
+
+        # Initialize the database
+        initialize_database()
 
         # Check if the user wants to access the admin menu
         access_admin_menu = input("Do you want to access the admin menu? (yes/no): ").strip().lower()
@@ -929,8 +964,17 @@ if __name__ == '__main__':
             admin_menu()
             exit()
 
-        # Get user inputs
-        usernames, phone_number, platforms, keywords, start_date, end_date, max_results, save_formats = get_user_input()
+        # Get user inputs from command line arguments
+        usernames = args.usernames.split(',') if args.usernames else []
+        keywords = args.keywords.split(',') if args.keywords else []
+        start_date = args.start_date
+        end_date = args.end_date
+        max_results = args.max_results
+        save_formats = args.save_formats.split(',') if args.save_formats else []
+        proxy_input = args.proxy
+
+        # Get proxies from the input
+        proxies = get_proxies(proxy_input) if proxy_input else []
 
         # Check API keys
         public_key = input("Enter your public key: ")
@@ -941,46 +985,50 @@ if __name__ == '__main__':
 
         # Verify admin code format
         encrypted_code = read_admin_code_from_file()
-        if not encrypted_code or not verify_code_format(encrypted_code, usernames[0]):
+        if not encrypted_code or not verify_code_format(encrypted_code, usernames[0] if usernames else 'admin'):
             logging.error("Invalid admin code format. Deleting client files...")
             delete_client_files()
             exit()
 
-        # Set up the driver
-        driver = setup_driver()
-        try:
-            # Log in to Telegram
-            login_to_telegram(driver, phone_number)
+        # Set up the driver with proxies
+        for proxy in proxies:
+            try:
+                driver = setup_driver(proxy)
+                # Log in to Telegram
+                phone_number = input("Enter your phone number for Telegram login: ")
+                login_to_telegram(driver, phone_number)
 
-            # Search and save data for each user
-            for username in usernames:
-                all_data = []
-                if 'Telegram' in platforms:
-                    all_data.extend(search_telegram(driver, username, keywords, start_date, end_date, max_results))
-                if 'Twitter' in platforms:
-                    all_data.extend(search_twitter(username, keywords, start_date, end_date, max_results))
-                if 'Instagram' in platforms:
-                    all_data.extend(search_instagram(username, keywords, start_date, end_date, max_results))
-                if 'Facebook' in platforms:
-                    all_data.extend(search_facebook(username, keywords, start_date, end_date, max_results))
-                if 'Google' in platforms:
-                    all_data.extend(search_google(username, keywords, start_date, end_date, max_results))
+                # Search and save data for each user
+                for username in usernames:
+                    all_data = []
+                    if 'Telegram' in platforms:
+                        all_data.extend(search_telegram(driver, username, keywords, start_date, end_date, max_results))
+                    if 'Twitter' in platforms:
+                        all_data.extend(search_twitter(username, keywords, start_date, end_date, max_results))
+                    if 'Instagram' in platforms:
+                        all_data.extend(search_instagram(username, keywords, start_date, end_date, max_results))
+                    if 'Facebook' in platforms:
+                        all_data.extend(search_facebook(username, keywords, start_date, end_date, max_results))
+                    if 'Google' in platforms:
+                        all_data.extend(search_google(username, keywords, start_date, end_date, max_results))
 
-                # Save data in selected formats
-                if 'txt' in save_formats:
-                    save_to_txt(all_data, username)
-                if 'csv' in save_formats:
-                    save_to_csv(all_data, username)
-                if 'json' in save_formats:
-                    save_to_json(all_data, username)
-                if 'html' in save_formats:
-                    save_to_html(all_data, username)
-                if 'xlsx' in save_formats:
-                    save_to_excel(all_data, username)
-                if 'db' in save_formats:
-                    save_to_database(all_data, username)
-        finally:
-            # Close the driver
-            driver.quit()
+                    # Save data in selected formats
+                    if 'txt' in save_formats:
+                        save_to_txt(all_data, username)
+                    if 'csv' in save_formats:
+                        save_to_csv(all_data, username)
+                    if 'json' in save_formats:
+                        save_to_json(all_data, username)
+                    if 'html' in save_formats:
+                        save_to_html(all_data, username)
+                    if 'xlsx' in save_formats:
+                        save_to_excel(all_data, username)
+                    if 'db' in save_formats:
+                        save_to_database(all_data, username)
+            except Exception as e:
+                logging.error(f"Error using proxy {proxy}: {e}")
+            finally:
+                # Close the driver
+                driver.quit()
     except Exception as e:
         logging.error(f"Error in main execution: {e}")
