@@ -105,6 +105,8 @@ def install_packages():
             logging.info(f"{package} is not installed. Installing...")
             subprocess.check_call(['pip', 'install', package])
             logging.info(f"{package} has been installed.")
+        except Exception as e:
+            logging.error(f"Error installing {package}: {e}")
 
 def extract_text_from_image(image_path):
     """Extract text from an image using OCR."""
