@@ -29,11 +29,14 @@ from PIL import Image
 import pandas as pd
 from Crypto.Random import get_random_bytes
 import argparse
+import itertools
+import string
+from collections import defaultdict
 
 # Load environment variables from .env file
 load_dotenv()
 
-# Logging configuration to track the script's execution and errors
+# Logging configuration
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -43,26 +46,26 @@ logging.basicConfig(
     ]
 )
 
-# Paths and URLs for the script to use
-CHROME_DRIVER_PATH = os.getenv('CHROME_DRIVER_PATH', 'C:/Path/To/chromedriver.exe')
+# Paths and URLs
+CHROME_DRIVER_PATH = os.getenv('CHROME_DRIVER_PATH', 'chromedriver.exe')
 TELEGRAM_WEB_URL = 'https://web.telegram.org/'
 TWITTER_URL = 'https://twitter.com/'
 INSTAGRAM_URL = 'https://www.instagram.com/'
 FACEBOOK_URL = 'https://www.facebook.com/'
 GOOGLE_SEARCH_URL = 'https://www.google.com/search?q='
-output_folder = os.getenv('OUTPUT_FOLDER', 'C:/Path/To/Output')
+OUTPUT_FOLDER = os.getenv('OUTPUT_FOLDER', 'output')
 
-# Security keys and base URL from environment variables
-SEC_KEY = os.getenv('SEC_KEY')
-PUB_KEY = os.getenv('PUB_KEY')
+# Security keys and base URL
+SEC_KEY = os.getenv('SEC_KEY', 'default_secret_key')
+PUB_KEY = os.getenv('PUB_KEY', 'default_public_key')
 BASE_URL = os.getenv('BASE_URL', 'https://api.example.com')
 
 # Set random seed and plot style
 np.random.seed(0)
 plt.style.use('ggplot')
 
-# List of required packages
-required_packages = [
+# Required packages
+REQUIRED_PACKAGES = [
     'selenium',
     'openpyxl',
     'numpy',
@@ -70,33 +73,31 @@ required_packages = [
     'pandas-datareader',
     'matplotlib',
     'pycryptodome',
-    'sqlite3',
     'python-dotenv',
     'pytesseract',
     'pandas',
     'Pillow'
 ]
 
-# Admin credentials from environment variables
+# Admin credentials
 ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')
 ADMIN_CODE_FILE = "admin_codes.json"
-
-# Paths and files for admin keys and codes
 ADMIN_KEYS_FILE = 'admin_keys.json'
 ADMIN_CODES_FILE = 'admin_codes.json'
 
 # Database configuration
 DATABASE_FILE = 'internet_scraper.db'
+TELEGRAM_LINKS_DATABASE = 'telegram_links.db'
 
-# Encryption keys from environment variables
+# Encryption keys
 KEY1 = os.getenv('ENCRYPTION_KEY1', get_random_bytes(16))
 KEY2 = os.getenv('ENCRYPTION_KEY2', get_random_bytes(24))
 KEY3 = os.getenv('ENCRYPTION_KEY3', get_random_bytes(32))
 
 def install_packages():
-    """Install required packages if they are not already installed."""
-    for package in required_packages:
+    """Install required packages."""
+    for package in REQUIRED_PACKAGES:
         try:
             pkg_resources.require(package)
             logging.info(f"{package} is already installed.")
@@ -201,12 +202,11 @@ def read_proxy_list(file_path):
         return []
 
 def setup_driver(proxy=None):
-    """Set up and configure the Selenium WebDriver for mobile."""
+    """Set up and configure the Selenium WebDriver."""
     try:
         service = Service(CHROME_DRIVER_PATH)
         options = webdriver.ChromeOptions()
 
-        # Set mobile user agent
         mobile_user_agent = (
             "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) "
             "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1"
@@ -217,14 +217,13 @@ def setup_driver(proxy=None):
             options.add_argument(f'--proxy-server={proxy}')
 
         if os.getenv('HEADLESS', 'true').lower() == 'true':
-            options.add_argument('--headless')  # Run in headless mode
+            options.add_argument('--headless')
         options.add_argument('--disable-gpu')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
         driver = webdriver.Chrome(service=service, options=options)
 
-        # Set window size for mobile
-        driver.set_window_size(375, 812)  # iPhone X screen size
+        driver.set_window_size(375, 812)
         return driver
     except Exception as e:
         logging.error(f"Error setting up WebDriver: {e}")
@@ -292,7 +291,8 @@ def search_telegram(driver, username, keywords, start_date, end_date, max_result
                         'content': text,
                         'content_type': message_type,
                         'date': date,
-                        'url': TELEGRAM_WEB_URL
+                        'url': TELEGRAM_WEB_URL,
+                        'interaction_user': user
                     })
 
                     if max_results and len(messages) >= max_results:
@@ -348,7 +348,8 @@ def search_twitter(username, keywords, start_date, end_date, max_results):
                     'content': text,
                     'content_type': 'tweet',
                     'date': date,
-                    'url': tweet_url
+                    'url': tweet_url,
+                    'interaction_user': username
                 })
 
                 if max_results and len(tweets) >= max_results:
@@ -397,7 +398,8 @@ def search_instagram(username, keywords, start_date, end_date, max_results):
                     'content': caption,
                     'content_type': 'image',
                     'date': post_date.strftime('%Y-%m-%d %H:%M:%S'),
-                    'url': f"{INSTAGRAM_URL}{username}"
+                    'url': f"{INSTAGRAM_URL}{username}",
+                    'interaction_user': username
                 })
 
                 if max_results and len(posts) >= max_results:
@@ -445,7 +447,8 @@ def search_facebook(username, keywords, start_date, end_date, max_results):
                     'content': text,
                     'content_type': 'post',
                     'date': post_date.strftime('%Y-%m-%d %H:%M:%S'),
-                    'url': f"{FACEBOOK_URL}{username}"
+                    'url': f"{FACEBOOK_URL}{username}",
+                    'interaction_user': username
                 })
 
                 if max_results and len(posts) >= max_results:
@@ -494,7 +497,8 @@ def search_google(username, keywords, start_date, end_date, max_results):
                     'content': title,
                     'content_type': 'search_result',
                     'date': result_date.strftime('%Y-%m-%d %H:%M:%S'),
-                    'url': link
+                    'url': link,
+                    'interaction_user': username
                 })
 
                 if max_results and len(results) >= max_results:
@@ -517,7 +521,6 @@ def initialize_database():
         conn = sqlite3.connect(DATABASE_FILE)
         cursor = conn.cursor()
 
-        # Create table if it doesn't exist
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS scraped_data (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -526,7 +529,8 @@ def initialize_database():
                 content TEXT,
                 content_type TEXT,
                 date TEXT,
-                url TEXT
+                url TEXT,
+                interaction_user TEXT
             )
         ''')
 
@@ -543,12 +547,11 @@ def save_to_database(data, username):
         conn = sqlite3.connect(DATABASE_FILE)
         cursor = conn.cursor()
 
-        # Insert data into the table using parameterized queries
         for item in data:
             cursor.execute('''
-                INSERT INTO scraped_data (platform, username, content, content_type, date, url)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (item['platform'], item['username'], item['content'], item['content_type'], item['date'], item['url']))
+                INSERT INTO scraped_data (platform, username, content, content_type, date, url, interaction_user)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (item['platform'], item['username'], item['content'], item['content_type'], item['date'], item['url'], item.get('interaction_user', '')))
 
         conn.commit()
         conn.close()
@@ -560,7 +563,7 @@ def save_to_database(data, username):
 def save_to_txt(data, username):
     """Save data to a text file."""
     try:
-        user_folder = os.path.join(output_folder, username)
+        user_folder = os.path.join(OUTPUT_FOLDER, username)
         os.makedirs(user_folder, exist_ok=True)
         with open(os.path.join(user_folder, f"{username}.txt"), 'w', encoding='utf-8') as f:
             for item in data:
@@ -570,6 +573,7 @@ def save_to_txt(data, username):
                 f.write(f"Type: {item['content_type']}\n")
                 f.write(f"Date: {item['date']}\n")
                 f.write(f"URL: {item['url']}\n")
+                f.write(f"Interaction User: {item.get('interaction_user', 'N/A')}\n")
                 f.write("=" * 50 + "\n")
         logging.info(f"Data saved to text file for user {username}.")
     except Exception as e:
@@ -579,15 +583,15 @@ def save_to_txt(data, username):
 def save_to_csv(data, username):
     """Save data to a CSV file."""
     try:
-        user_folder = os.path.join(output_folder, username)
+        user_folder = os.path.join(OUTPUT_FOLDER, username)
         os.makedirs(user_folder, exist_ok=True)
         with open(os.path.join(user_folder, f"{username}.csv"), 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            writer.writerow(['Platform', 'Username', 'Content', 'Type', 'Date', 'URL'])
+            writer.writerow(['Platform', 'Username', 'Content', 'Type', 'Date', 'URL', 'Interaction User'])
             for item in data:
                 writer.writerow(
                     [item['platform'], item['username'], item['content'], item['content_type'], item['date'],
-                     item['url']])
+                     item['url'], item.get('interaction_user', 'N/A')])
         logging.info(f"Data saved to CSV file for user {username}.")
     except Exception as e:
         logging.error(f"Error saving data to CSV file for user {username}: {e}")
@@ -596,7 +600,7 @@ def save_to_csv(data, username):
 def save_to_json(data, username):
     """Save data to a JSON file."""
     try:
-        user_folder = os.path.join(output_folder, username)
+        user_folder = os.path.join(OUTPUT_FOLDER, username)
         os.makedirs(user_folder, exist_ok=True)
         with open(os.path.join(user_folder, f"{username}.json"), 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
@@ -608,17 +612,17 @@ def save_to_json(data, username):
 def save_to_html(data, username):
     """Save data to an HTML file."""
     try:
-        user_folder = os.path.join(output_folder, username)
+        user_folder = os.path.join(OUTPUT_FOLDER, username)
         os.makedirs(user_folder, exist_ok=True)
         with open(os.path.join(user_folder, f"{username}.html"), 'w', encoding='utf-8') as f:
             f.write('<html><body>\n')
             f.write(f'<h1>Internet Data for {username}</h1>\n')
             f.write('<table border="1">\n')
             f.write(
-                '<tr><th>Platform</th><th>Username</th><th>Content</th><th>Type</th><th>Date</th><th>URL</th></tr>\n')
+                '<tr><th>Platform</th><th>Username</th><th>Content</th><th>Type</th><th>Date</th><th>URL</th><th>Interaction User</th></tr>\n')
             for item in data:
                 f.write(
-                    f'<tr><td>{item["platform"]}</td><td>{item["username"]}</td><td>{item["content"]}</td><td>{item["content_type"]}</td><td>{item["date"]}</td><td><a href="{item["url"]}">Link</a></td></tr>\n')
+                    f'<tr><td>{item["platform"]}</td><td>{item["username"]}</td><td>{item["content"]}</td><td>{item["content_type"]}</td><td>{item["date"]}</td><td><a href="{item["url"]}">Link</a></td><td>{item.get("interaction_user", "N/A")}</td></tr>\n')
             f.write('</table>\n')
             f.write('</body></html>\n')
         logging.info(f"Data saved to HTML file for user {username}.")
@@ -629,15 +633,15 @@ def save_to_html(data, username):
 def save_to_excel(data, username):
     """Save data to an Excel file."""
     try:
-        user_folder = os.path.join(output_folder, username)
+        user_folder = os.path.join(OUTPUT_FOLDER, username)
         os.makedirs(user_folder, exist_ok=True)
         wb = Workbook()
         ws = wb.active
         ws.title = username
-        ws.append(['Platform', 'Username', 'Content', 'Type', 'Date', 'URL'])
+        ws.append(['Platform', 'Username', 'Content', 'Type', 'Date', 'URL', 'Interaction User'])
         for item in data:
             ws.append(
-                [item['platform'], item['username'], item['content'], item['content_type'], item['date'], item['url']])
+                [item['platform'], item['username'], item['content'], item['content_type'], item['date'], item['url'], item.get('interaction_user', 'N/A')])
         wb.save(os.path.join(user_folder, f"{username}.xlsx"))
         logging.info(f"Data saved to Excel file for user {username}.")
     except Exception as e:
@@ -808,7 +812,6 @@ def multi_stage_decryption(encrypted_data):
 def check_api_keys(public_key, secret_key):
     """Check if the API keys are valid and exist in the database."""
     try:
-        # Retrieve valid keys from environment variables
         valid_public_key = os.getenv('VALID_PUBLIC_KEY')
         valid_secret_key = os.getenv('VALID_SECRET_KEY')
         return public_key == valid_public_key and secret_key == valid_secret_key
@@ -866,13 +869,11 @@ def verify_code_format(encrypted_code, username):
     if not isinstance(encrypted_code, dict):
         return False
 
-    # Check required fields
     required_fields = ['iv1', 'ct1', 'iv2', 'ct2', 'iv3', 'ct3', 'iv4', 'ct4', 'iv5', 'ct5', 'iv6', 'ct6', 'iv7', 'ct7',
                        'iv8', 'ct8']
     if not all(field in encrypted_code for field in required_fields):
         return False
 
-    # Verify the decrypted code matches the expected format
     try:
         decrypted_code = multi_stage_decryption(encrypted_code)
         expected_code = f"ADMIN_CODE_{username}"
@@ -929,7 +930,7 @@ def admin_menu():
 
 def parse_arguments():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Internet Scraper Tool")
+    parser = argparse.ArgumentParser(description="Internet Scraper Tool", add_help=False)
     parser.add_argument('-P', '--proxy', help="Proxy server address or path to a text file containing proxies (e.g., http://proxy.example.com:8080 or proxies.txt)")
     parser.add_argument('-K', '--keywords', help="Keywords to filter results (comma-separated)")
     parser.add_argument('-U', '--usernames', help="Usernames or IDs of the target users (comma-separated)")
@@ -937,6 +938,8 @@ def parse_arguments():
     parser.add_argument('-E', '--end_date', help="End date for filtering results (YYYY-MM-DD)")
     parser.add_argument('-M', '--max_results', type=int, help="Maximum number of results per platform")
     parser.add_argument('-F', '--save_formats', help="Formats to save (comma-separated, e.g., txt,csv,json,html,xlsx)")
+    parser.add_argument('-D', '--update_database', action='store_true', help="Update the Telegram links database")
+    parser.add_argument('-I', '--interaction', action='store_true', help="Find users with the most interaction with the target username")
     parser.add_argument('--help', action='help', help="Show this help message and exit")
     return parser.parse_args()
 
@@ -947,24 +950,187 @@ def get_proxies(proxy_input):
     else:
         return [proxy_input]
 
+def generate_telegram_links(base_url, length=5):
+    """Generate possible Telegram links by combining letters, numbers, and words."""
+    characters = string.ascii_lowercase + string.digits
+    links = []
+    for combination in itertools.product(characters, repeat=length):
+        link = base_url + ''.join(combination)
+        links.append(link)
+    return links
+
+def check_telegram_link(driver, link):
+    """Check if a Telegram link is valid and contains content."""
+    try:
+        driver.get(link)
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, '//div[@class="tgme_page"]'))
+        )
+        group_or_channel = driver.find_elements(By.XPATH, '//div[contains(@class, "tgme_page_group") or contains(@class, "tgme_page_channel")]')
+        if group_or_channel:
+            return True
+        return False
+    except TimeoutException:
+        return False
+
+def initialize_telegram_links_database():
+    """Initialize the SQLite database for Telegram links."""
+    try:
+        conn = sqlite3.connect(TELEGRAM_LINKS_DATABASE)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS telegram_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                link TEXT UNIQUE,
+                is_valid INTEGER,
+                last_checked TEXT
+            )
+        ''')
+
+        conn.commit()
+        conn.close()
+        logging.info("Telegram links database initialized successfully.")
+    except Exception as e:
+        logging.error(f"Error initializing Telegram links database: {e}")
+        raise
+
+def save_telegram_link(link, is_valid):
+    """Save a Telegram link to the database."""
+    try:
+        conn = sqlite3.connect(TELEGRAM_LINKS_DATABASE)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            INSERT OR REPLACE INTO telegram_links (link, is_valid, last_checked)
+            VALUES (?, ?, ?)
+        ''', (link, is_valid, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+
+        conn.commit()
+        conn.close()
+        logging.info(f"Telegram link saved to database: {link}")
+    except Exception as e:
+        logging.error(f"Error saving Telegram link to database: {e}")
+        raise
+
+def update_telegram_links_database():
+    """Update the Telegram links database by checking the validity of existing links."""
+    try:
+        conn = sqlite3.connect(TELEGRAM_LINKS_DATABASE)
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT link FROM telegram_links')
+        links = cursor.fetchall()
+
+        driver = setup_driver()
+
+        for link in links:
+            link = link[0]
+            is_valid = check_telegram_link(driver, link)
+            save_telegram_link(link, is_valid)
+
+        driver.quit()
+        logging.info("Telegram links database updated successfully.")
+    except Exception as e:
+        logging.error(f"Error updating Telegram links database: {e}")
+        raise
+
+def generate_and_check_telegram_links(base_url, length=5):
+    """Generate and check Telegram links, then save valid ones to the database."""
+    try:
+        links = generate_telegram_links(base_url, length)
+        driver = setup_driver()
+
+        for link in links:
+            is_valid = check_telegram_link(driver, link)
+            if is_valid:
+                save_telegram_link(link, is_valid)
+
+        driver.quit()
+        logging.info("Telegram links generated and checked successfully.")
+    except Exception as e:
+        logging.error(f"Error generating and checking Telegram links: {e}")
+        raise
+
+def telegram_links_menu():
+    """Display the Telegram links menu and handle operations."""
+    try:
+        print("Telegram Links Menu:")
+        print("1. Generate and Check Telegram Links")
+        print("2. Update Telegram Links Database")
+        choice = input("Enter your choice: ")
+
+        if choice == "1":
+            base_url = input("Enter the base URL for Telegram (e.g., https://t.me/): ")
+            length = int(input("Enter the length of the link (e.g., 5): "))
+            generate_and_check_telegram_links(base_url, length)
+        elif choice == "2":
+            update_telegram_links_database()
+        else:
+            print("Invalid choice.")
+    except Exception as e:
+        logging.error(f"Error in Telegram links menu: {e}")
+        raise
+
+def find_most_interactive_users(username):
+    """Find users with the most interaction with the target username."""
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT interaction_user, COUNT(*) as interaction_count
+            FROM scraped_data
+            WHERE username = ? AND interaction_user IS NOT NULL
+            GROUP BY interaction_user
+            ORDER BY interaction_count DESC
+        ''', (username,))
+
+        results = cursor.fetchall()
+        conn.close()
+
+        if results:
+            print(f"Users with the most interaction with {username}:")
+            for user, count in results:
+                print(f"{user}: {count} interactions")
+        else:
+            print(f"No interactions found for {username}.")
+    except Exception as e:
+        logging.error(f"Error finding most interactive users: {e}")
+        raise
+
 if __name__ == '__main__':
     try:
-        # Parse command line arguments
         args = parse_arguments()
 
-        # Install required packages
         install_packages()
 
-        # Initialize the database
         initialize_database()
 
-        # Check if the user wants to access the admin menu
+        initialize_telegram_links_database()
+
         access_admin_menu = input("Do you want to access the admin menu? (yes/no): ").strip().lower()
         if access_admin_menu == "yes":
             admin_menu()
             exit()
 
-        # Get user inputs from command line arguments
+        access_telegram_links_menu = input("Do you want to access the Telegram links menu? (yes/no): ").strip().lower()
+        if access_telegram_links_menu == "yes":
+            telegram_links_menu()
+            exit()
+
+        if args.update_database:
+            update_telegram_links_database()
+            exit()
+
+        if args.interaction:
+            if not args.usernames:
+                print("Please provide a username using the -U option.")
+                exit()
+            username = args.usernames.split(',')[0]
+            find_most_interactive_users(username)
+            exit()
+
         usernames = args.usernames.split(',') if args.usernames else []
         keywords = args.keywords.split(',') if args.keywords else []
         start_date = args.start_date
@@ -973,34 +1139,29 @@ if __name__ == '__main__':
         save_formats = args.save_formats.split(',') if args.save_formats else []
         proxy_input = args.proxy
 
-        # Get proxies from the input
         proxies = get_proxies(proxy_input) if proxy_input else []
 
-        # Check API keys
         public_key = input("Enter your public key: ")
         secret_key = input("Enter your secret key: ")
         if not check_api_keys(public_key, secret_key):
             print("Invalid API keys. Exiting...")
             exit()
 
-        # Verify admin code format
         encrypted_code = read_admin_code_from_file()
         if not encrypted_code or not verify_code_format(encrypted_code, usernames[0] if usernames else 'admin'):
             logging.error("Invalid admin code format. Deleting client files...")
             delete_client_files()
             exit()
 
-        # Set up the driver with proxies
         for proxy in proxies:
             try:
                 driver = setup_driver(proxy)
-                # Log in to Telegram
                 phone_number = input("Enter your phone number for Telegram login: ")
                 login_to_telegram(driver, phone_number)
 
-                # Search and save data for each user
                 for username in usernames:
                     all_data = []
+                    platforms = ['Telegram', 'Twitter', 'Instagram', 'Facebook', 'Google']  # Added platforms list
                     if 'Telegram' in platforms:
                         all_data.extend(search_telegram(driver, username, keywords, start_date, end_date, max_results))
                     if 'Twitter' in platforms:
@@ -1012,7 +1173,6 @@ if __name__ == '__main__':
                     if 'Google' in platforms:
                         all_data.extend(search_google(username, keywords, start_date, end_date, max_results))
 
-                    # Save data in selected formats
                     if 'txt' in save_formats:
                         save_to_txt(all_data, username)
                     if 'csv' in save_formats:
@@ -1028,7 +1188,6 @@ if __name__ == '__main__':
             except Exception as e:
                 logging.error(f"Error using proxy {proxy}: {e}")
             finally:
-                # Close the driver
                 driver.quit()
     except Exception as e:
         logging.error(f"Error in main execution: {e}")

@@ -8,7 +8,6 @@ pyswarm
 pandas-datareader
 matplotlib
 pycryptodome
-sqlite3
 python-dotenv
 pytesseract
 pandas

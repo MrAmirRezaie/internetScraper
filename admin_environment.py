@@ -4,7 +4,7 @@ import logging
 from Crypto.Cipher import AES, DES3, Blowfish
 from Crypto.Util.Padding import pad, unpad
 import base64
-import hashlib
+from Crypto.Random import get_random_bytes
 
 # Logging configuration
 logging.basicConfig(
@@ -89,6 +89,66 @@ def multi_stage_encryption(data):
         }
     except Exception as e:
         logging.error(f"Error in multi-stage encryption: {e}")
+        raise
+
+def multi_stage_decryption(encrypted_data):
+    """Decrypt data in 8 stages using different encryption protocols."""
+    try:
+        key1 = KEY1
+        key2 = KEY2
+        key3 = KEY3
+
+        # Stage 8: DES3
+        iv8 = base64.b64decode(encrypted_data['iv8'])
+        ct8 = base64.b64decode(encrypted_data['ct8'])
+        cipher = DES3.new(key2, DES3.MODE_CBC, iv=iv8)
+        pt7 = unpad(cipher.decrypt(ct8), DES3.block_size).decode('utf-8')
+
+        # Stage 7: AES
+        iv7 = base64.b64decode(encrypted_data['iv7'])
+        ct7 = base64.b64decode(encrypted_data['ct7'])
+        cipher = AES.new(key1, AES.MODE_CBC, iv=iv7)
+        pt6 = unpad(cipher.decrypt(ct7), AES.block_size).decode('utf-8')
+
+        # Stage 6: Blowfish
+        iv6 = base64.b64decode(encrypted_data['iv6'])
+        ct6 = base64.b64decode(encrypted_data['ct6'])
+        cipher = Blowfish.new(key3, Blowfish.MODE_CBC, iv=iv6)
+        pt5 = unpad(cipher.decrypt(ct6), Blowfish.block_size).decode('utf-8')
+
+        # Stage 5: DES3
+        iv5 = base64.b64decode(encrypted_data['iv5'])
+        ct5 = base64.b64decode(encrypted_data['ct5'])
+        cipher = DES3.new(key2, DES3.MODE_CBC, iv=iv5)
+        pt4 = unpad(cipher.decrypt(ct5), DES3.block_size).decode('utf-8')
+
+        # Stage 4: AES
+        iv4 = base64.b64decode(encrypted_data['iv4'])
+        ct4 = base64.b64decode(encrypted_data['ct4'])
+        cipher = AES.new(key1, AES.MODE_CBC, iv=iv4)
+        pt3 = unpad(cipher.decrypt(ct4), AES.block_size).decode('utf-8')
+
+        # Stage 3: Blowfish
+        iv3 = base64.b64decode(encrypted_data['iv3'])
+        ct3 = base64.b64decode(encrypted_data['ct3'])
+        cipher = Blowfish.new(key3, Blowfish.MODE_CBC, iv=iv3)
+        pt2 = unpad(cipher.decrypt(ct3), Blowfish.block_size).decode('utf-8')
+
+        # Stage 2: DES3
+        iv2 = base64.b64decode(encrypted_data['iv2'])
+        ct2 = base64.b64decode(encrypted_data['ct2'])
+        cipher = DES3.new(key2, DES3.MODE_CBC, iv=iv2)
+        pt1 = unpad(cipher.decrypt(ct2), DES3.block_size).decode('utf-8')
+
+        # Stage 1: AES
+        iv1 = base64.b64decode(encrypted_data['iv1'])
+        ct1 = base64.b64decode(encrypted_data['ct1'])
+        cipher = AES.new(key1, AES.MODE_CBC, iv=iv1)
+        pt = unpad(cipher.decrypt(ct1), AES.block_size).decode('utf-8')
+
+        return pt
+    except Exception as e:
+        logging.error(f"Error in multi-stage decryption: {e}")
         raise
 
 def generate_admin_code(username):
