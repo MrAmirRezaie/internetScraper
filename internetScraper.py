@@ -34,6 +34,9 @@ import argparse
 import itertools
 import string
 from collections import defaultdict
+import subprocess
+import sqlite3
+import pkg_resources
 
 # Load environment variables from .env file
 load_dotenv()
@@ -661,6 +664,52 @@ def analyze_sentiment(text):
     except Exception as e:
         logging.error(f"Error analyzing sentiment: {e}")
         return None
+
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description='Internet Scraper')
+    parser.add_argument('--usernames', type=str, help='Comma-separated list of usernames to search')
+    parser.add_argument('--keywords', type=str, help='Comma-separated list of keywords to search')
+    parser.add_argument('--start_date', type=str, help='Start date for search (YYYY-MM-DD)')
+    parser.add_argument('--end_date', type=str, help='End date for search (YYYY-MM-DD)')
+    parser.add_argument('--max_results', type=int, help='Maximum number of results to retrieve')
+    parser.add_argument('--save_formats', type=str, help='Comma-separated list of formats to save data (txt, csv, json, html, xlsx, db)')
+    parser.add_argument('--proxy', type=str, help='Proxy to use for scraping')
+    return parser.parse_args()
+
+def get_proxies(proxy_input):
+    """Get a list of proxies from input or file."""
+    if proxy_input.endswith('.txt'):
+        return read_proxy_list(proxy_input)
+    else:
+        return [proxy_input]
+
+def check_api_keys(public_key, secret_key):
+    """Check if the provided API keys are valid."""
+    return public_key == PUB_KEY and secret_key == SEC_KEY
+
+def read_admin_code_from_file():
+    """Read the admin code from a file."""
+    try:
+        with open(ADMIN_CODE_FILE, 'r') as f:
+            return f.read().strip()
+    except Exception as e:
+        logging.error(f"Error reading admin code file: {e}")
+        return None
+
+def verify_code_format(code, username):
+    """Verify the format of the admin code."""
+    return code.startswith(username) and len(code) == 32
+
+def delete_client_files():
+    """Delete client files in case of invalid admin code."""
+    try:
+        os.remove(ADMIN_CODE_FILE)
+        os.remove(ADMIN_KEYS_FILE)
+        os.remove(ADMIN_CODES_FILE)
+        logging.info("Client files deleted due to invalid admin code.")
+    except Exception as e:
+        logging.error(f"Error deleting client files: {e}")
 
 def main():
     try:
