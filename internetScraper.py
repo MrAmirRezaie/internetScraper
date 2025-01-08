@@ -7,7 +7,6 @@ from Crypto.Util.Padding import pad, unpad
 import base64
 import time
 import csv
-import sqlite3
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -18,15 +17,18 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from openpyxl import Workbook
 import numpy as np
-import pyswarm as ps
-import pandas_datareader as pdt
+import pandas as pd
 import matplotlib.pyplot as plt
-import subprocess
-import pkg_resources
+import seaborn as sns
+from sqlalchemy import create_engine, Column, Integer, String, DateTime
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+from bs4 import BeautifulSoup
+import nltk
+from nltk.sentiment import SentimentIntensityAnalyzer
 from dotenv import load_dotenv
 import pytesseract
 from PIL import Image
-import pandas as pd
 from Crypto.Random import get_random_bytes
 import argparse
 import itertools
@@ -69,13 +71,15 @@ REQUIRED_PACKAGES = [
     'selenium',
     'openpyxl',
     'numpy',
-    'pyswarm',
-    'pandas-datareader',
+    'pandas',
     'matplotlib',
+    'seaborn',
+    'sqlalchemy',
+    'beautifulsoup4',
+    'nltk',
     'pycryptodome',
     'python-dotenv',
     'pytesseract',
-    'pandas',
     'Pillow'
 ]
 
@@ -94,6 +98,25 @@ TELEGRAM_LINKS_DATABASE = 'telegram_links.db'
 KEY1 = os.getenv('ENCRYPTION_KEY1', get_random_bytes(16))
 KEY2 = os.getenv('ENCRYPTION_KEY2', get_random_bytes(24))
 KEY3 = os.getenv('ENCRYPTION_KEY3', get_random_bytes(32))
+
+# SQLAlchemy setup
+Base = declarative_base()
+engine = create_engine(f'sqlite:///{DATABASE_FILE}')
+Session = sessionmaker(bind=engine)
+session = Session()
+
+class ScrapedData(Base):
+    __tablename__ = 'scraped_data'
+    id = Column(Integer, primary_key=True)
+    platform = Column(String)
+    username = Column(String)
+    content = Column(String)
+    content_type = Column(String)
+    date = Column(DateTime)
+    url = Column(String)
+    interaction_user = Column(String)
+
+Base.metadata.create_all(engine)
 
 def install_packages():
     """Install required packages."""
@@ -517,46 +540,21 @@ def search_google(username, keywords, start_date, end_date, max_results):
     finally:
         driver.quit()
 
-def initialize_database():
-    """Initialize the SQLite database and create the necessary tables."""
-    try:
-        conn = sqlite3.connect(DATABASE_FILE)
-        cursor = conn.cursor()
-
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS scraped_data (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                platform TEXT,
-                username TEXT,
-                content TEXT,
-                content_type TEXT,
-                date TEXT,
-                url TEXT,
-                interaction_user TEXT
-            )
-        ''')
-
-        conn.commit()
-        conn.close()
-        logging.info("Database initialized successfully.")
-    except Exception as e:
-        logging.error(f"Error initializing database: {e}")
-        raise
-
 def save_to_database(data, username):
     """Save data to the SQLite database."""
     try:
-        conn = sqlite3.connect(DATABASE_FILE)
-        cursor = conn.cursor()
-
         for item in data:
-            cursor.execute('''
-                INSERT INTO scraped_data (platform, username, content, content_type, date, url, interaction_user)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (item['platform'], item['username'], item['content'], item['content_type'], item['date'], item['url'], item.get('interaction_user', '')))
-
-        conn.commit()
-        conn.close()
+            scraped_data = ScrapedData(
+                platform=item['platform'],
+                username=item['username'],
+                content=item['content'],
+                content_type=item['content_type'],
+                date=datetime.strptime(item['date'], '%Y-%m-%d %H:%M:%S'),
+                url=item['url'],
+                interaction_user=item.get('interaction_user', '')
+            )
+            session.add(scraped_data)
+        session.commit()
         logging.info(f"Data saved to database for user {username}.")
     except Exception as e:
         logging.error(f"Error saving data to database for user {username}: {e}")
@@ -587,13 +585,8 @@ def save_to_csv(data, username):
     try:
         user_folder = os.path.join(OUTPUT_FOLDER, username)
         os.makedirs(user_folder, exist_ok=True)
-        with open(os.path.join(user_folder, f"{username}.csv"), 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerow(['Platform', 'Username', 'Content', 'Type', 'Date', 'URL', 'Interaction User'])
-            for item in data:
-                writer.writerow(
-                    [item['platform'], item['username'], item['content'], item['content_type'], item['date'],
-                     item['url'], item.get('interaction_user', 'N/A')])
+        df = pd.DataFrame(data)
+        df.to_csv(os.path.join(user_folder, f"{username}.csv"), index=False)
         logging.info(f"Data saved to CSV file for user {username}.")
     except Exception as e:
         logging.error(f"Error saving data to CSV file for user {username}: {e}")
@@ -637,501 +630,43 @@ def save_to_excel(data, username):
     try:
         user_folder = os.path.join(OUTPUT_FOLDER, username)
         os.makedirs(user_folder, exist_ok=True)
-        wb = Workbook()
-        ws = wb.active
-        ws.title = username
-        ws.append(['Platform', 'Username', 'Content', 'Type', 'Date', 'URL', 'Interaction User'])
-        for item in data:
-            ws.append(
-                [item['platform'], item['username'], item['content'], item['content_type'], item['date'], item['url'], item.get('interaction_user', 'N/A')])
-        wb.save(os.path.join(user_folder, f"{username}.xlsx"))
+        df = pd.DataFrame(data)
+        df.to_excel(os.path.join(user_folder, f"{username}.xlsx"), index=False)
         logging.info(f"Data saved to Excel file for user {username}.")
     except Exception as e:
         logging.error(f"Error saving data to Excel file for user {username}: {e}")
         raise
 
-def encrypt_data(data, key):
-    """Encrypt data using AES encryption."""
+def visualize_data(data, username):
+    """Visualize data using Matplotlib and Seaborn."""
     try:
-        cipher = AES.new(key, AES.MODE_CBC)
-        ct_bytes = cipher.encrypt(pad(data.encode(), AES.block_size))
-        iv = base64.b64encode(cipher.iv).decode('utf-8')
-        ct = base64.b64encode(ct_bytes).decode('utf-8')
-        return iv, ct
+        df = pd.DataFrame(data)
+        plt.figure(figsize=(10, 6))
+        sns.countplot(x='platform', data=df)
+        plt.title(f"Data Distribution for {username}")
+        plt.xlabel('Platform')
+        plt.ylabel('Count')
+        plt.savefig(os.path.join(OUTPUT_FOLDER, username, f"{username}_data_distribution.png"))
+        plt.close()
+        logging.info(f"Data visualization saved for user {username}.")
     except Exception as e:
-        logging.error(f"Error encrypting data: {e}")
-        raise
+        logging.error(f"Error visualizing data for user {username}: {e}")
 
-def decrypt_data(iv, ct, key):
-    """Decrypt data using AES decryption."""
+def analyze_sentiment(text):
+    """Analyze sentiment of the text using NLTK."""
     try:
-        iv = base64.b64decode(iv)
-        ct = base64.b64decode(ct)
-        cipher = AES.new(key, AES.MODE_CBC, iv)
-        pt = unpad(cipher.decrypt(ct), AES.block_size)
-        return pt.decode('utf-8')
+        sia = SentimentIntensityAnalyzer()
+        sentiment = sia.polarity_scores(text)
+        return sentiment
     except Exception as e:
-        logging.error(f"Error decrypting data: {e}")
-        raise
-
-def multi_stage_encryption(data):
-    """Encrypt data in 8 stages using different encryption protocols."""
-    try:
-        key1 = KEY1
-        key2 = KEY2
-        key3 = KEY3
-
-        # Stage 1: AES
-        cipher = AES.new(key1, AES.MODE_CBC)
-        ct_bytes = cipher.encrypt(pad(data.encode(), AES.block_size))
-        iv1 = base64.b64encode(cipher.iv).decode('utf-8')
-        ct1 = base64.b64encode(ct_bytes).decode('utf-8')
-
-        # Stage 2: DES3
-        cipher = DES3.new(key2, DES3.MODE_CBC)
-        ct_bytes = cipher.encrypt(pad(ct1.encode(), DES3.block_size))
-        iv2 = base64.b64encode(cipher.iv).decode('utf-8')
-        ct2 = base64.b64encode(ct_bytes).decode('utf-8')
-
-        # Stage 3: Blowfish
-        cipher = Blowfish.new(key3, Blowfish.MODE_CBC)
-        ct_bytes = cipher.encrypt(pad(ct2.encode(), Blowfish.block_size))
-        iv3 = base64.b64encode(cipher.iv).decode('utf-8')
-        ct3 = base64.b64encode(ct_bytes).decode('utf-8')
-
-        # Stage 4: AES again
-        cipher = AES.new(key1, AES.MODE_CBC)
-        ct_bytes = cipher.encrypt(pad(ct3.encode(), AES.block_size))
-        iv4 = base64.b64encode(cipher.iv).decode('utf-8')
-        ct4 = base64.b64encode(ct_bytes).decode('utf-8')
-
-        # Stage 5: DES3 again
-        cipher = DES3.new(key2, DES3.MODE_CBC)
-        ct_bytes = cipher.encrypt(pad(ct4.encode(), DES3.block_size))
-        iv5 = base64.b64encode(cipher.iv).decode('utf-8')
-        ct5 = base64.b64encode(ct_bytes).decode('utf-8')
-
-        # Stage 6: Blowfish again
-        cipher = Blowfish.new(key3, Blowfish.MODE_CBC)
-        ct_bytes = cipher.encrypt(pad(ct5.encode(), Blowfish.block_size))
-        iv6 = base64.b64encode(cipher.iv).decode('utf-8')
-        ct6 = base64.b64encode(ct_bytes).decode('utf-8')
-
-        # Stage 7: AES again
-        cipher = AES.new(key1, AES.MODE_CBC)
-        ct_bytes = cipher.encrypt(pad(ct6.encode(), AES.block_size))
-        iv7 = base64.b64encode(cipher.iv).decode('utf-8')
-        ct7 = base64.b64encode(ct_bytes).decode('utf-8')
-
-        # Stage 8: DES3 again
-        cipher = DES3.new(key2, DES3.MODE_CBC)
-        ct_bytes = cipher.encrypt(pad(ct7.encode(), DES3.block_size))
-        iv8 = base64.b64encode(cipher.iv).decode('utf-8')
-        ct8 = base64.b64encode(ct_bytes).decode('utf-8')
-
-        return {
-            'iv1': iv1, 'ct1': ct1,
-            'iv2': iv2, 'ct2': ct2,
-            'iv3': iv3, 'ct3': ct3,
-            'iv4': iv4, 'ct4': ct4,
-            'iv5': iv5, 'ct5': ct5,
-            'iv6': iv6, 'ct6': ct6,
-            'iv7': iv7, 'ct7': ct7,
-            'iv8': iv8, 'ct8': ct8
-        }
-    except Exception as e:
-        logging.error(f"Error in multi-stage encryption: {e}")
-        raise
-
-def multi_stage_decryption(encrypted_data):
-    """Decrypt data in 8 stages using different encryption protocols."""
-    try:
-        key1 = KEY1
-        key2 = KEY2
-        key3 = KEY3
-
-        # Stage 8: DES3
-        iv = base64.b64decode(encrypted_data['iv8'])
-        ct = base64.b64decode(encrypted_data['ct8'])
-        cipher = DES3.new(key2, DES3.MODE_CBC, iv)
-        pt = unpad(cipher.decrypt(ct), DES3.block_size)
-        data = pt.decode('utf-8')
-
-        # Stage 7: AES
-        iv = base64.b64decode(encrypted_data['iv7'])
-        ct = base64.b64decode(encrypted_data['ct7'])
-        cipher = AES.new(key1, AES.MODE_CBC, iv)
-        pt = unpad(cipher.decrypt(ct), AES.block_size)
-        data = pt.decode('utf-8')
-
-        # Stage 6: Blowfish
-        iv = base64.b64decode(encrypted_data['iv6'])
-        ct = base64.b64decode(encrypted_data['ct6'])
-        cipher = Blowfish.new(key3, Blowfish.MODE_CBC, iv)
-        pt = unpad(cipher.decrypt(ct), Blowfish.block_size)
-        data = pt.decode('utf-8')
-
-        # Stage 5: DES3
-        iv = base64.b64decode(encrypted_data['iv5'])
-        ct = base64.b64decode(encrypted_data['ct5'])
-        cipher = DES3.new(key2, DES3.MODE_CBC, iv)
-        pt = unpad(cipher.decrypt(ct), DES3.block_size)
-        data = pt.decode('utf-8')
-
-        # Stage 4: AES
-        iv = base64.b64decode(encrypted_data['iv4'])
-        ct = base64.b64decode(encrypted_data['ct4'])
-        cipher = AES.new(key1, AES.MODE_CBC, iv)
-        pt = unpad(cipher.decrypt(ct), AES.block_size)
-        data = pt.decode('utf-8')
-
-        # Stage 3: Blowfish
-        iv = base64.b64decode(encrypted_data['iv3'])
-        ct = base64.b64decode(encrypted_data['ct3'])
-        cipher = Blowfish.new(key3, Blowfish.MODE_CBC, iv)
-        pt = unpad(cipher.decrypt(ct), Blowfish.block_size)
-        data = pt.decode('utf-8')
-
-        # Stage 2: DES3
-        iv = base64.b64decode(encrypted_data['iv2'])
-        ct = base64.b64decode(encrypted_data['ct2'])
-        cipher = DES3.new(key2, DES3.MODE_CBC, iv)
-        pt = unpad(cipher.decrypt(ct), DES3.block_size)
-        data = pt.decode('utf-8')
-
-        # Stage 1: AES
-        iv = base64.b64decode(encrypted_data['iv1'])
-        ct = base64.b64decode(encrypted_data['ct1'])
-        cipher = AES.new(key1, AES.MODE_CBC, iv)
-        pt = unpad(cipher.decrypt(ct), AES.block_size)
-        data = pt.decode('utf-8')
-
-        return data
-    except Exception as e:
-        logging.error(f"Error in multi-stage decryption: {e}")
-        raise
-
-def check_api_keys(public_key, secret_key):
-    """Check if the API keys are valid and exist in the database."""
-    try:
-        valid_public_key = os.getenv('VALID_PUBLIC_KEY')
-        valid_secret_key = os.getenv('VALID_SECRET_KEY')
-        return public_key == valid_public_key and secret_key == valid_secret_key
-    except Exception as e:
-        logging.error(f"Error checking API keys: {e}")
-        raise
-
-def admin_authentication():
-    """Authenticate the admin user."""
-    try:
-        admin_username = input("Enter admin username: ")
-        admin_password = input("Enter admin password: ")
-        valid_admin_username = os.getenv('ADMIN_USERNAME')
-        valid_admin_password = os.getenv('ADMIN_PASSWORD')
-        return admin_username == valid_admin_username and admin_password == valid_admin_password
-    except Exception as e:
-        logging.error(f"Error in admin authentication: {e}")
-        raise
-
-def generate_admin_code(username):
-    """Generate an admin code with multi-stage encryption based on username."""
-    try:
-        admin_code = f"ADMIN_CODE_{username}"
-        encrypted_code = multi_stage_encryption(admin_code)
-        return encrypted_code
-    except Exception as e:
-        logging.error(f"Error generating admin code: {e}")
-        raise
-
-def save_admin_code_to_file(encrypted_code):
-    """Save the encrypted admin code to a text file."""
-    try:
-        with open(ADMIN_CODE_FILE, 'w') as f:
-            json.dump(encrypted_code, f)
-        logging.info("Admin code saved to file.")
-    except Exception as e:
-        logging.error(f"Error saving admin code to file: {e}")
-        raise
-
-def read_admin_code_from_file():
-    """Read the encrypted admin code from a text file."""
-    try:
-        with open(ADMIN_CODE_FILE, 'r') as f:
-            encrypted_code = json.load(f)
-        return encrypted_code
-    except FileNotFoundError:
-        logging.error("Admin code file not found.")
+        logging.error(f"Error analyzing sentiment: {e}")
         return None
-    except Exception as e:
-        logging.error(f"Error reading admin code from file: {e}")
-        raise
 
-def verify_code_format(encrypted_code, username):
-    """Verify the format and integrity of the admin code based on username."""
-    if not isinstance(encrypted_code, dict):
-        return False
-
-    required_fields = ['iv1', 'ct1', 'iv2', 'ct2', 'iv3', 'ct3', 'iv4', 'ct4', 'iv5', 'ct5', 'iv6', 'ct6', 'iv7', 'ct7',
-                       'iv8', 'ct8']
-    if not all(field in encrypted_code for field in required_fields):
-        return False
-
-    try:
-        decrypted_code = multi_stage_decryption(encrypted_code)
-        expected_code = f"ADMIN_CODE_{username}"
-        return decrypted_code == expected_code
-    except Exception as e:
-        logging.error(f"Error verifying admin code: {e}")
-        return False
-
-def delete_client_files():
-    """Delete client files if the code format is invalid."""
-    try:
-        if os.path.exists(ADMIN_CODE_FILE):
-            os.remove(ADMIN_CODE_FILE)
-            logging.info(f"Deleted file: {ADMIN_CODE_FILE}")
-
-        if os.path.exists(__file__):
-            os.remove(__file__)
-            logging.info(f"Deleted file: {__file__}")
-
-        logging.info("Client files deleted due to invalid code format.")
-    except Exception as e:
-        logging.error(f"Error deleting client files: {e}")
-
-def admin_menu():
-    """Display the admin menu and handle admin operations."""
-    try:
-        if not admin_authentication():
-            print("Admin authentication failed. Exiting...")
-            return
-
-        print("Admin Menu:")
-        print("1. Generate Admin Code")
-        print("2. Read Admin Code")
-        choice = input("Enter your choice: ")
-
-        if choice == "1":
-            username = input("Enter admin username: ")
-            encrypted_code = generate_admin_code(username)
-            save_admin_code_to_file(encrypted_code)
-            print("Admin code generated and saved successfully.")
-        elif choice == "2":
-            username = input("Enter admin username: ")
-            encrypted_code = read_admin_code_from_file()
-            if encrypted_code:
-                decrypted_code = multi_stage_decryption(encrypted_code)
-                print(f"Decrypted Admin Code: {decrypted_code}")
-            else:
-                print("No admin code found.")
-        else:
-            print("Invalid choice.")
-    except Exception as e:
-        logging.error(f"Error in admin menu: {e}")
-        raise
-
-def parse_arguments():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Internet Scraper Tool", add_help=False)
-    parser.add_argument('-P', '--proxy', help="Proxy server address or path to a text file containing proxies (e.g., http://proxy.example.com:8080 or proxies.txt)")
-    parser.add_argument('-K', '--keywords', help="Keywords to filter results (comma-separated)")
-    parser.add_argument('-U', '--usernames', help="Usernames or IDs of the target users (comma-separated)")
-    parser.add_argument('-S', '--start_date', help="Start date for filtering results (YYYY-MM-DD)")
-    parser.add_argument('-E', '--end_date', help="End date for filtering results (YYYY-MM-DD)")
-    parser.add_argument('-M', '--max_results', type=int, help="Maximum number of results per platform")
-    parser.add_argument('-F', '--save_formats', help="Formats to save (comma-separated, e.g., txt,csv,json,html,xlsx)")
-    parser.add_argument('-D', '--update_database', action='store_true', help="Update the Telegram links database")
-    parser.add_argument('-I', '--interaction', action='store_true', help="Find users with the most interaction with the target username")
-    parser.add_argument('--help', action='help', help="Show this help message and exit")
-    return parser.parse_args()
-
-def get_proxies(proxy_input):
-    """Get a list of proxies from the input."""
-    if proxy_input.endswith('.txt'):
-        return read_proxy_list(proxy_input)
-    else:
-        return [proxy_input]
-
-def generate_telegram_links(base_url, length=5):
-    """Generate possible Telegram links by combining letters, numbers, and words."""
-    characters = string.ascii_lowercase + string.digits
-    links = []
-    for combination in itertools.product(characters, repeat=length):
-        link = base_url + ''.join(combination)
-        links.append(link)
-    return links
-
-def check_telegram_link(driver, link):
-    """Check if a Telegram link is valid and contains content."""
-    try:
-        driver.get(link)
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.XPATH, '//div[@class="tgme_page"]'))
-        )
-        group_or_channel = driver.find_elements(By.XPATH, '//div[contains(@class, "tgme_page_group") or contains(@class, "tgme_page_channel")]')
-        if group_or_channel:
-            return True
-        return False
-    except TimeoutException:
-        return False
-
-def initialize_telegram_links_database():
-    """Initialize the SQLite database for Telegram links."""
-    try:
-        conn = sqlite3.connect(TELEGRAM_LINKS_DATABASE)
-        cursor = conn.cursor()
-
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS telegram_links (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                link TEXT UNIQUE,
-                is_valid INTEGER,
-                last_checked TEXT
-            )
-        ''')
-
-        conn.commit()
-        conn.close()
-        logging.info("Telegram links database initialized successfully.")
-    except Exception as e:
-        logging.error(f"Error initializing Telegram links database: {e}")
-        raise
-
-def save_telegram_link(link, is_valid):
-    """Save a Telegram link to the database."""
-    try:
-        conn = sqlite3.connect(TELEGRAM_LINKS_DATABASE)
-        cursor = conn.cursor()
-
-        cursor.execute('''
-            INSERT OR REPLACE INTO telegram_links (link, is_valid, last_checked)
-            VALUES (?, ?, ?)
-        ''', (link, is_valid, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
-
-        conn.commit()
-        conn.close()
-        logging.info(f"Telegram link saved to database: {link}")
-    except Exception as e:
-        logging.error(f"Error saving Telegram link to database: {e}")
-        raise
-
-def update_telegram_links_database():
-    """Update the Telegram links database by checking the validity of existing links."""
-    try:
-        conn = sqlite3.connect(TELEGRAM_LINKS_DATABASE)
-        cursor = conn.cursor()
-
-        cursor.execute('SELECT link FROM telegram_links')
-        links = cursor.fetchall()
-
-        driver = setup_driver()
-
-        for link in links:
-            link = link[0]
-            is_valid = check_telegram_link(driver, link)
-            save_telegram_link(link, is_valid)
-
-        driver.quit()
-        logging.info("Telegram links database updated successfully.")
-    except Exception as e:
-        logging.error(f"Error updating Telegram links database: {e}")
-        raise
-
-def generate_and_check_telegram_links(base_url, length=5):
-    """Generate and check Telegram links, then save valid ones to the database."""
-    try:
-        links = generate_telegram_links(base_url, length)
-        driver = setup_driver()
-
-        for link in links:
-            is_valid = check_telegram_link(driver, link)
-            if is_valid:
-                save_telegram_link(link, is_valid)
-
-        driver.quit()
-        logging.info("Telegram links generated and checked successfully.")
-    except Exception as e:
-        logging.error(f"Error generating and checking Telegram links: {e}")
-        raise
-
-def telegram_links_menu():
-    """Display the Telegram links menu and handle operations."""
-    try:
-        print("Telegram Links Menu:")
-        print("1. Generate and Check Telegram Links")
-        print("2. Update Telegram Links Database")
-        choice = input("Enter your choice: ")
-
-        if choice == "1":
-            base_url = input("Enter the base URL for Telegram (e.g., https://t.me/): ")
-            length = int(input("Enter the length of the link (e.g., 5): "))
-            generate_and_check_telegram_links(base_url, length)
-        elif choice == "2":
-            update_telegram_links_database()
-        else:
-            print("Invalid choice.")
-    except Exception as e:
-        logging.error(f"Error in Telegram links menu: {e}")
-        raise
-
-def find_most_interactive_users(username):
-    """Find users with the most interaction with the target username."""
-    try:
-        conn = sqlite3.connect(DATABASE_FILE)
-        cursor = conn.cursor()
-
-        cursor.execute('''
-            SELECT interaction_user, COUNT(*) as interaction_count
-            FROM scraped_data
-            WHERE username = ? AND interaction_user IS NOT NULL
-            GROUP BY interaction_user
-            ORDER BY interaction_count DESC
-        ''', (username,))
-
-        results = cursor.fetchall()
-        conn.close()
-
-        if results:
-            print(f"Users with the most interaction with {username}:")
-            for user, count in results:
-                print(f"{user}: {count} interactions")
-        else:
-            print(f"No interactions found for {username}.")
-    except Exception as e:
-        logging.error(f"Error finding most interactive users: {e}")
-        raise
-
-if __name__ == '__main__':
+def main():
     try:
         args = parse_arguments()
 
         install_packages()
-
-        initialize_database()
-
-        initialize_telegram_links_database()
-
-        access_admin_menu = input("Do you want to access the admin menu? (yes/no): ").strip().lower()
-        if access_admin_menu == "yes":
-            admin_menu()
-            exit()
-
-        access_telegram_links_menu = input("Do you want to access the Telegram links menu? (yes/no): ").strip().lower()
-        if access_telegram_links_menu == "yes":
-            telegram_links_menu()
-            exit()
-
-        if args.update_database:
-            update_telegram_links_database()
-            exit()
-
-        if args.interaction:
-            if not args.usernames:
-                print("Please provide a username using the -U option.")
-                exit()
-            username = args.usernames.split(',')[0]
-            find_most_interactive_users(username)
-            exit()
 
         usernames = args.usernames.split(',') if args.usernames else []
         keywords = args.keywords.split(',') if args.keywords else []
@@ -1163,7 +698,7 @@ if __name__ == '__main__':
 
                 for username in usernames:
                     all_data = []
-                    platforms = ['Telegram', 'Twitter', 'Instagram', 'Facebook', 'Google']  # Added platforms list
+                    platforms = ['Telegram', 'Twitter', 'Instagram', 'Facebook', 'Google']
                     if 'Telegram' in platforms:
                         all_data.extend(search_telegram(driver, username, keywords, start_date, end_date, max_results))
                     if 'Twitter' in platforms:
@@ -1187,9 +722,15 @@ if __name__ == '__main__':
                         save_to_excel(all_data, username)
                     if 'db' in save_formats:
                         save_to_database(all_data, username)
+
+                    visualize_data(all_data, username)
+
             except Exception as e:
                 logging.error(f"Error using proxy {proxy}: {e}")
             finally:
                 driver.quit()
     except Exception as e:
         logging.error(f"Error in main execution: {e}")
+
+if __name__ == '__main__':
+    main()
