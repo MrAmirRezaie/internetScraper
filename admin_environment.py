@@ -163,18 +163,25 @@ def generate_admin_code(username):
 
 def save_admin_code(encrypted_code):
     """Save the encrypted admin code to a file."""
-    with open(ADMIN_CODES_FILE, 'w') as f:
-        json.dump(encrypted_code, f)
-    logging.info("Admin code saved.")
+    try:
+        with open(ADMIN_CODES_FILE, 'w') as f:
+            json.dump(encrypted_code, f)
+        logging.info("Admin code saved.")
+    except Exception as e:
+        logging.error(f"Error saving admin code: {e}")
+        raise
 
 def load_admin_code():
     """Load the encrypted admin code from a file."""
     try:
+        if not os.path.exists(ADMIN_CODES_FILE):
+            logging.error("Admin code file not found.")
+            return None
         with open(ADMIN_CODES_FILE, 'r') as f:
             encrypted_code = json.load(f)
         return encrypted_code
-    except FileNotFoundError:
-        logging.error("Admin code file not found.")
+    except Exception as e:
+        logging.error(f"Error loading admin code: {e}")
         return None
 
 def verify_admin_code(encrypted_code, username):
@@ -196,9 +203,12 @@ def admin_menu():
 
     if choice == "1":
         username = input("Enter admin username: ")
-        encrypted_code = generate_admin_code(username)
-        save_admin_code(encrypted_code)
-        print("Admin code generated and saved successfully.")
+        try:
+            encrypted_code = generate_admin_code(username)
+            save_admin_code(encrypted_code)
+            print("Admin code generated and saved successfully.")
+        except Exception as e:
+            print(f"Error generating admin code: {e}")
     elif choice == "2":
         username = input("Enter admin username: ")
         encrypted_code = load_admin_code()
