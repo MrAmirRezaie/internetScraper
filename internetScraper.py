@@ -7,7 +7,7 @@ from Crypto.Util.Padding import pad, unpad
 import base64
 import time
 import csv
-from datetime import datetime
+from datetime import datetime, timedelta
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -37,6 +37,7 @@ from collections import defaultdict
 import subprocess
 import sqlite3
 import pkg_resources
+import requests
 
 # Load environment variables from .env file
 load_dotenv()
@@ -83,7 +84,8 @@ REQUIRED_PACKAGES = [
     'pycryptodome',
     'python-dotenv',
     'pytesseract',
-    'Pillow'
+    'Pillow',
+    'requests'
 ]
 
 # Admin credentials
@@ -118,6 +120,14 @@ class ScrapedData(Base):
     date = Column(DateTime)
     url = Column(String)
     interaction_user = Column(String)
+
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key=True)
+    username = Column(String, unique=True)
+    password_hash = Column(String)
+    is_admin = Column(Boolean, default=False)
+    expiry_date = Column(DateTime)
 
 Base.metadata.create_all(engine)
 
@@ -711,6 +721,24 @@ def delete_client_files():
     except Exception as e:
         logging.error(f"Error deleting client files: {e}")
 
+def validate_script_with_api(script_content):
+    """Validate script using the API."""
+    try:
+        response = requests.post(
+            BASE_URL,
+            json={'script_content': script_content},
+            headers={'Content-Type': 'application/json'}
+        )
+        if response.status_code == 200:
+            result = response.json()
+            return result['is_valid'], result.get('message', '')
+        else:
+            logging.error(f"API returned status code {response.status_code}: {response.text}")
+            return False, "API validation failed."
+    except Exception as e:
+        logging.error(f"Error validating script with API: {e}")
+        return False, "API validation failed."
+
 def main():
     try:
         args = parse_arguments()
@@ -758,6 +786,15 @@ def main():
                         all_data.extend(search_facebook(username, keywords, start_date, end_date, max_results))
                     if 'Google' in platforms:
                         all_data.extend(search_google(username, keywords, start_date, end_date, max_results))
+
+                    # Validate script using API
+                    for item in all_data:
+                        is_valid, message = validate_script_with_api(item['content'])
+                        if not is_valid:
+                            logging.warning(f"Script validation failed for {username}: {message}")
+                            if "expired" in message.lower():
+                                delete_client_files()
+                                exit()
 
                     if 'txt' in save_formats:
                         save_to_txt(all_data, username)
