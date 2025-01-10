@@ -63,7 +63,7 @@ OUTPUT_FOLDER = os.getenv('OUTPUT_FOLDER', 'output')
 # Security keys and base URL
 SEC_KEY = os.getenv('SEC_KEY', 'default_secret_key')
 PUB_KEY = os.getenv('PUB_KEY', 'default_public_key')
-BASE_URL = os.getenv('BASE_URL', 'https://api.example.com')
+BASE_URL = os.getenv('BASE_URL', 'https://mramirrezaie.ir/api.php')
 
 # Set random seed and plot style
 np.random.seed(0)
@@ -693,15 +693,37 @@ def get_proxies(proxy_input):
     else:
         return [proxy_input]
 
-def check_api_keys(public_key, secret_key):
-    """Check if the provided API keys are valid."""
-    return public_key == PUB_KEY and secret_key == SEC_KEY
+def check_api_keys(public_key, secret_key, username):
+    """Check if the provided API keys are valid by calling the API."""
+    if not public_key or not secret_key or not username:
+        logging.error("Public key, secret key, or username is missing.")
+        return False
+
+    try:
+        response = requests.post(
+            BASE_URL,
+            json={'publicKey': public_key, 'secretKey': secret_key, 'username': username},
+            headers={'Content-Type': 'application/json'}
+        )
+        if response.status_code == 200:
+            result = response.json()
+            return result.get('message') == 'Keys are valid'
+        else:
+            logging.error(f"API returned status code {response.status_code}: {response.text}")
+            return False
+    except Exception as e:
+        logging.error(f"Error validating API keys: {e}")
+        return False
 
 def read_admin_code_from_file():
     """Read the admin code from a file."""
     try:
+        if not os.path.exists(ADMIN_CODE_FILE):
+            logging.error("Admin code file not found.")
+            return None
         with open(ADMIN_CODE_FILE, 'r') as f:
-            return f.read().strip()
+            encrypted_code = json.load(f)
+        return encrypted_code
     except Exception as e:
         logging.error(f"Error reading admin code file: {e}")
         return None
@@ -713,9 +735,12 @@ def verify_code_format(code, username):
 def delete_client_files():
     """Delete client files in case of invalid admin code."""
     try:
-        os.remove(ADMIN_CODE_FILE)
-        os.remove(ADMIN_KEYS_FILE)
-        os.remove(ADMIN_CODES_FILE)
+        if os.path.exists(ADMIN_CODE_FILE):
+            os.remove(ADMIN_CODE_FILE)
+        if os.path.exists(ADMIN_KEYS_FILE):
+            os.remove(ADMIN_KEYS_FILE)
+        if os.path.exists(ADMIN_CODES_FILE):
+            os.remove(ADMIN_CODES_FILE)
         logging.info("Client files deleted due to invalid admin code.")
     except Exception as e:
         logging.error(f"Error deleting client files: {e}")
@@ -744,7 +769,6 @@ def main():
 
         install_packages()
 
-        usernames = args.usernames.split(',') if args.usernames else []
         keywords = args.keywords.split(',') if args.keywords else []
         start_date = args.start_date
         end_date = args.end_date
@@ -756,12 +780,25 @@ def main():
 
         public_key = input("Enter your public key: ")
         secret_key = input("Enter your secret key: ")
-        if not check_api_keys(public_key, secret_key):
-            print("Invalid API keys. Exiting...")
+        username = input("Enter your username: ")  # دریافت نام کاربری از کاربر
+
+        # بررسی اینکه نام کاربری وارد شده است
+        if not username:
+            logging.error("Username is required. Exiting...")
+            exit()
+
+        # Check if API keys are provided
+        if not public_key or not secret_key:
+            logging.error("Public key or secret key is missing. Exiting...")
+            exit()
+
+        # Validate API keys
+        if not check_api_keys(public_key, secret_key, username):  # ارسال نام کاربری به تابع
+            logging.error("Invalid API keys or username. Exiting...")
             exit()
 
         encrypted_code = read_admin_code_from_file()
-        if not encrypted_code or not verify_code_format(encrypted_code, usernames[0] if usernames else 'admin'):
+        if not encrypted_code or not verify_code_format(encrypted_code, username):
             logging.error("Invalid admin code format. Deleting client files...")
             delete_client_files()
             exit()
@@ -772,43 +809,42 @@ def main():
                 phone_number = input("Enter your phone number for Telegram login: ")
                 login_to_telegram(driver, phone_number)
 
-                for username in usernames:
-                    all_data = []
-                    platforms = ['Telegram', 'Twitter', 'Instagram', 'Facebook', 'Google']
-                    if 'Telegram' in platforms:
-                        all_data.extend(search_telegram(driver, username, keywords, start_date, end_date, max_results))
-                    if 'Twitter' in platforms:
-                        all_data.extend(search_twitter(username, keywords, start_date, end_date, max_results))
-                    if 'Instagram' in platforms:
-                        all_data.extend(search_instagram(username, keywords, start_date, end_date, max_results))
-                    if 'Facebook' in platforms:
-                        all_data.extend(search_facebook(username, keywords, start_date, end_date, max_results))
-                    if 'Google' in platforms:
-                        all_data.extend(search_google(username, keywords, start_date, end_date, max_results))
+                all_data = []
+                platforms = ['Telegram', 'Twitter', 'Instagram', 'Facebook', 'Google']
+                if 'Telegram' in platforms:
+                    all_data.extend(search_telegram(driver, username, keywords, start_date, end_date, max_results))
+                if 'Twitter' in platforms:
+                    all_data.extend(search_twitter(username, keywords, start_date, end_date, max_results))
+                if 'Instagram' in platforms:
+                    all_data.extend(search_instagram(username, keywords, start_date, end_date, max_results))
+                if 'Facebook' in platforms:
+                    all_data.extend(search_facebook(username, keywords, start_date, end_date, max_results))
+                if 'Google' in platforms:
+                    all_data.extend(search_google(username, keywords, start_date, end_date, max_results))
 
-                    # Validate script using API
-                    for item in all_data:
-                        is_valid, message = validate_script_with_api(item['content'])
-                        if not is_valid:
-                            logging.warning(f"Script validation failed for {username}: {message}")
-                            if "expired" in message.lower():
-                                delete_client_files()
-                                exit()
+                # Validate script using API
+                for item in all_data:
+                    is_valid, message = validate_script_with_api(item['content'])
+                    if not is_valid:
+                        logging.warning(f"Script validation failed for {username}: {message}")
+                        if "expired" in message.lower():
+                            delete_client_files()
+                            exit()
 
-                    if 'txt' in save_formats:
-                        save_to_txt(all_data, username)
-                    if 'csv' in save_formats:
-                        save_to_csv(all_data, username)
-                    if 'json' in save_formats:
-                        save_to_json(all_data, username)
-                    if 'html' in save_formats:
-                        save_to_html(all_data, username)
-                    if 'xlsx' in save_formats:
-                        save_to_excel(all_data, username)
-                    if 'db' in save_formats:
-                        save_to_database(all_data, username)
+                if 'txt' in save_formats:
+                    save_to_txt(all_data, username)
+                if 'csv' in save_formats:
+                    save_to_csv(all_data, username)
+                if 'json' in save_formats:
+                    save_to_json(all_data, username)
+                if 'html' in save_formats:
+                    save_to_html(all_data, username)
+                if 'xlsx' in save_formats:
+                    save_to_excel(all_data, username)
+                if 'db' in save_formats:
+                    save_to_database(all_data, username)
 
-                    visualize_data(all_data, username)
+                visualize_data(all_data, username)
 
             except Exception as e:
                 logging.error(f"Error using proxy {proxy}: {e}")
