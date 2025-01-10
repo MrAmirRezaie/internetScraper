@@ -707,12 +707,23 @@ def check_api_keys(public_key, secret_key, username):
         )
         if response.status_code == 200:
             result = response.json()
-            return result.get('message') == 'Keys are valid'
+            if result.get('message') == 'Keys are valid':
+                logging.info("API keys and username are valid.")
+                return True
+            else:
+                logging.error(f"API returned invalid message: {result.get('message')}")
+                return False
         else:
             logging.error(f"API returned status code {response.status_code}: {response.text}")
             return False
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         logging.error(f"Error validating API keys: {e}")
+        return False
+    except json.JSONDecodeError as e:
+        logging.error(f"Error decoding API response: {e}")
+        return False
+    except Exception as e:
+        logging.error(f"Unexpected error validating API keys: {e}")
         return False
 
 def read_admin_code_from_file():
@@ -780,7 +791,7 @@ def main():
 
         public_key = input("Enter your public key: ")
         secret_key = input("Enter your secret key: ")
-        username = input("Enter your username: ")  # دریافت نام کاربری از کاربر
+        username = input("Enter your username: ")
 
         # بررسی اینکه نام کاربری وارد شده است
         if not username:
@@ -793,7 +804,7 @@ def main():
             exit()
 
         # Validate API keys
-        if not check_api_keys(public_key, secret_key, username):  # ارسال نام کاربری به تابع
+        if not check_api_keys(public_key, secret_key, username):
             logging.error("Invalid API keys or username. Exiting...")
             exit()
 

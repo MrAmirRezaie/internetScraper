@@ -22,6 +22,38 @@ KEY1 = os.getenv('ENCRYPTION_KEY1', get_random_bytes(16))
 KEY2 = os.getenv('ENCRYPTION_KEY2', get_random_bytes(24))
 KEY3 = os.getenv('ENCRYPTION_KEY3', get_random_bytes(32))
 
+def save_admin_keys():
+    """Save the encryption keys to a file."""
+    try:
+        keys = {
+            'KEY1': base64.b64encode(KEY1).decode('utf-8'),
+            'KEY2': base64.b64encode(KEY2).decode('utf-8'),
+            'KEY3': base64.b64encode(KEY3).decode('utf-8')
+        }
+        with open(ADMIN_KEYS_FILE, 'w') as f:
+            json.dump(keys, f)
+        logging.info("Admin keys saved.")
+    except Exception as e:
+        logging.error(f"Error saving admin keys: {e}")
+        raise
+
+def load_admin_keys():
+    """Load the encryption keys from a file."""
+    try:
+        if not os.path.exists(ADMIN_KEYS_FILE):
+            logging.error("Admin keys file not found.")
+            return None
+        with open(ADMIN_KEYS_FILE, 'r') as f:
+            keys = json.load(f)
+        return {
+            'KEY1': base64.b64decode(keys['KEY1']),
+            'KEY2': base64.b64decode(keys['KEY2']),
+            'KEY3': base64.b64decode(keys['KEY3'])
+        }
+    except Exception as e:
+        logging.error(f"Error loading admin keys: {e}")
+        return None
+
 def multi_stage_encryption(data):
     """Encrypt data in 8 stages using different encryption protocols."""
     try:
@@ -223,4 +255,7 @@ def admin_menu():
         print("Invalid choice.")
 
 if __name__ == '__main__':
+    # Save admin keys on first run
+    if not os.path.exists(ADMIN_KEYS_FILE):
+        save_admin_keys()
     admin_menu()
