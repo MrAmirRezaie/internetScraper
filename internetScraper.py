@@ -57,6 +57,8 @@ TELEGRAM_WEB_URL = 'https://web.telegram.org/'
 TWITTER_URL = 'https://twitter.com/'
 INSTAGRAM_URL = 'https://www.instagram.com/'
 FACEBOOK_URL = 'https://www.facebook.com/'
+LINKEDIN_URL = 'https://www.linkedin.com/'
+REDDIT_URL = 'https://www.reddit.com/'
 GOOGLE_SEARCH_URL = 'https://www.google.com/search?q='
 OUTPUT_FOLDER = os.getenv('OUTPUT_FOLDER', 'output')
 
@@ -531,6 +533,104 @@ def search_facebook(username, keywords, start_date, end_date, max_results):
     finally:
         driver.quit()
 
+def search_linkedin(username, keywords, start_date, end_date, max_results):
+    """Search LinkedIn for posts from a specific user."""
+    try:
+        driver = setup_driver()
+        driver.get(f"{LINKEDIN_URL}in/{username}")
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, '//div[contains(@class, "feed-shared-update-v2")]'))
+        )
+        posts = []
+        post_elements = driver.find_elements(By.XPATH, '//div[contains(@class, "feed-shared-update-v2")]')
+        for element in post_elements:
+            try:
+                text = element.find_element(By.XPATH, './/div[contains(@class, "feed-shared-update-v2__description")]').text
+                post_date = datetime.now()
+
+                if start_date and end_date:
+                    start = datetime.strptime(start_date, '%Y-%m-%d')
+                    end = datetime.strptime(end_date, '%Y-%m-%d')
+                    if not (start <= post_date <= end):
+                        continue
+
+                if keywords:
+                    if not any(keyword.lower() in text.lower() for keyword in keywords):
+                        continue
+
+                posts.append({
+                    'platform': 'LinkedIn',
+                    'username': username,
+                    'content': text,
+                    'content_type': 'post',
+                    'date': post_date.strftime('%Y-%m-%d %H:%M:%S'),
+                    'url': f"{LINKEDIN_URL}in/{username}",
+                    'interaction_user': username
+                })
+
+                if max_results and len(posts) >= max_results:
+                    break
+
+            except NoSuchElementException as e:
+                logging.warning(f"Error extracting post: {e}")
+
+        logging.info(f"Extracted {len(posts)} posts from LinkedIn for user {username}.")
+        return posts
+    except Exception as e:
+        logging.error(f"Error searching LinkedIn for user {username}: {e}")
+        return []
+    finally:
+        driver.quit()
+
+def search_reddit(username, keywords, start_date, end_date, max_results):
+    """Search Reddit for posts from a specific user."""
+    try:
+        driver = setup_driver()
+        driver.get(f"{REDDIT_URL}user/{username}")
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, '//div[contains(@class, "Post")]'))
+        )
+        posts = []
+        post_elements = driver.find_elements(By.XPATH, '//div[contains(@class, "Post")]')
+        for element in post_elements:
+            try:
+                text = element.find_element(By.XPATH, './/h3[contains(@class, "PostTitle")]').text
+                post_date = datetime.now()
+
+                if start_date and end_date:
+                    start = datetime.strptime(start_date, '%Y-%m-%d')
+                    end = datetime.strptime(end_date, '%Y-%m-%d')
+                    if not (start <= post_date <= end):
+                        continue
+
+                if keywords:
+                    if not any(keyword.lower() in text.lower() for keyword in keywords):
+                        continue
+
+                posts.append({
+                    'platform': 'Reddit',
+                    'username': username,
+                    'content': text,
+                    'content_type': 'post',
+                    'date': post_date.strftime('%Y-%m-%d %H:%M:%S'),
+                    'url': f"{REDDIT_URL}user/{username}",
+                    'interaction_user': username
+                })
+
+                if max_results and len(posts) >= max_results:
+                    break
+
+            except NoSuchElementException as e:
+                logging.warning(f"Error extracting post: {e}")
+
+        logging.info(f"Extracted {len(posts)} posts from Reddit for user {username}.")
+        return posts
+    except Exception as e:
+        logging.error(f"Error searching Reddit for user {username}: {e}")
+        return []
+    finally:
+        driver.quit()
+
 def search_google(username, keywords, start_date, end_date, max_results):
     """Search Google for results related to a specific user."""
     try:
@@ -846,7 +946,7 @@ def main():
                 login_to_telegram(driver, phone_number)
 
                 all_data = []
-                platforms = ['Telegram', 'Twitter', 'Instagram', 'Facebook', 'Google']
+                platforms = ['Telegram', 'Twitter', 'Instagram', 'Facebook', 'LinkedIn', 'Reddit', 'Google']
                 if 'Telegram' in platforms:
                     all_data.extend(search_telegram(driver, username, keywords, start_date, end_date, max_results))
                 if 'Twitter' in platforms:
@@ -855,6 +955,10 @@ def main():
                     all_data.extend(search_instagram(username, keywords, start_date, end_date, max_results))
                 if 'Facebook' in platforms:
                     all_data.extend(search_facebook(username, keywords, start_date, end_date, max_results))
+                if 'LinkedIn' in platforms:
+                    all_data.extend(search_linkedin(username, keywords, start_date, end_date, max_results))
+                if 'Reddit' in platforms:
+                    all_data.extend(search_reddit(username, keywords, start_date, end_date, max_results))
                 if 'Google' in platforms:
                     all_data.extend(search_google(username, keywords, start_date, end_date, max_results))
 
