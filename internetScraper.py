@@ -34,6 +34,14 @@ import importlib.metadata
 import requests
 import telebot
 from googletrans import Translator
+from cryptography.fernet import Fernet
+
+# Check if .env file exists, if not, create it with a new encryption key
+if not os.path.exists('.env'):
+    with open('.env', 'w') as env_file:
+        encryption_key = Fernet.generate_key().decode()
+        env_file.write(f"ENCRYPTION_KEY={encryption_key}\n")
+    logging.info(".env file created with a new encryption key.")
 
 # Load environment variables from .env file
 load_dotenv()
@@ -89,7 +97,8 @@ REQUIRED_PACKAGES = [
     'Pillow',
     'requests',
     'pyTelegramBotAPI',
-    'googletrans==4.0.0-rc1'
+    'googletrans==4.0.0-rc1',
+    'cryptography'
 ]
 
 # Database configuration
@@ -97,9 +106,11 @@ DATABASE_FILE = 'internet_scraper.db'
 TELEGRAM_LINKS_DATABASE = 'telegram_links.db'
 
 # Encryption keys
-KEY1 = os.getenv('ENCRYPTION_KEY1', get_random_bytes(16))
-KEY2 = os.getenv('ENCRYPTION_KEY2', get_random_bytes(24))
-KEY3 = os.getenv('ENCRYPTION_KEY3', get_random_bytes(32))
+ENCRYPTION_KEY = os.getenv('ENCRYPTION_KEY')
+if not ENCRYPTION_KEY:
+    logging.error("ENCRYPTION_KEY not found in .env file. Exiting...")
+    exit()
+cipher_suite = Fernet(ENCRYPTION_KEY.encode())
 
 # SQLAlchemy setup
 Base = declarative_base()
@@ -136,6 +147,65 @@ class AdminKey(Base):
     user = relationship("User")
 
 Base.metadata.create_all(engine)
+
+def encrypt_data(data):
+    """Encrypt data using Fernet symmetric encryption."""
+    if isinstance(data, str):
+        data = data.encode()
+    return cipher_suite.encrypt(data).decode()
+
+def decrypt_data(encrypted_data):
+    """Decrypt data using Fernet symmetric encryption."""
+    return cipher_suite.decrypt(encrypted_data.encode()).decode()
+
+def add_user(username, password, is_admin=False, expiry_days=30):
+    """Add a new user to the database with encrypted password."""
+    try:
+        expiry_date = datetime.now() + timedelta(days=expiry_days)
+        password_hash = encrypt_data(password)
+        user = User(
+            username=username,
+            password_hash=password_hash,
+            is_admin=is_admin,
+            expiry_date=expiry_date
+        )
+        session.add(user)
+        session.commit()
+        logging.info(f"User {username} added successfully.")
+    except Exception as e:
+        logging.error(f"Error adding user {username}: {e}")
+        session.rollback()
+
+def delete_expired_users():
+    """Delete users whose expiry date has passed."""
+    try:
+        expired_users = session.query(User).filter(User.expiry_date < datetime.now()).all()
+        for user in expired_users:
+            session.delete(user)
+        session.commit()
+        logging.info(f"Deleted {len(expired_users)} expired users.")
+    except Exception as e:
+        logging.error(f"Error deleting expired users: {e}")
+        session.rollback()
+
+def check_user_credentials(username, password):
+    """Check if the provided username and password are valid."""
+    try:
+        user = session.query(User).filter(User.username == username).first()
+        if user and decrypt_data(user.password_hash) == password:
+            if user.expiry_date > datetime.now():
+                logging.info(f"User {username} authenticated successfully.")
+                return True
+            else:
+                logging.warning(f"User {username} has expired.")
+                delete_expired_users()
+                return False
+        else:
+            logging.warning(f"Invalid credentials for user {username}.")
+            return False
+    except Exception as e:
+        logging.error(f"Error checking credentials for user {username}: {e}")
+        return False
 
 def install_packages():
     """Install required packages."""
