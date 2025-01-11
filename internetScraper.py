@@ -33,6 +33,7 @@ import sqlite3
 import importlib.metadata
 import requests
 import telebot
+from googletrans import Translator
 
 # Load environment variables from .env file
 load_dotenv()
@@ -87,7 +88,8 @@ REQUIRED_PACKAGES = [
     'pytesseract',
     'Pillow',
     'requests',
-    'pyTelegramBotAPI'
+    'pyTelegramBotAPI',
+    'googletrans==4.0.0-rc1'
 ]
 
 # Database configuration
@@ -174,14 +176,45 @@ def get_keys_from_telegram():
         logging.error(f"Error in Telegram bot polling: {e}")
         raise
 
-def extract_text_from_image(image_path):
-    """Extract text from an image using OCR."""
+def extract_text_from_image(image_path, lang='eng'):
+    """Extract text from an image using OCR with support for multiple languages."""
     try:
         img = Image.open(image_path)
-        text = pytesseract.image_to_string(img)
+        text = pytesseract.image_to_string(img, lang=lang)
         return text
     except Exception as e:
         logging.error(f"Error extracting text from image: {e}")
+        return None
+
+def translate_text(text, src_lang='auto', dest_lang='en'):
+    """Translate text from one language to another using Google Translate."""
+    try:
+        translator = Translator()
+        translation = translator.translate(text, src=src_lang, dest=dest_lang)
+        return translation.text
+    except Exception as e:
+        logging.error(f"Error translating text: {e}")
+        return None
+
+def process_file(file_path, lang='eng', translate=False, dest_lang='en'):
+    """Process a file based on its extension with OCR and translation support."""
+    if file_path.endswith('.sql'):
+        return read_sql_file(file_path)
+    elif file_path.endswith('.txt'):
+        return read_text_file(file_path)
+    elif file_path.endswith('.csv'):
+        return read_csv_file(file_path)
+    elif file_path.endswith('.xlsx') or file_path.endswith('.xls'):
+        return read_excel_file(file_path)
+    elif file_path.endswith('.json'):
+        return read_json_file(file_path)
+    elif file_path.endswith('.png') or file_path.endswith('.jpg') or file_path.endswith('.jpeg'):
+        text = extract_text_from_image(file_path, lang=lang)
+        if translate:
+            text = translate_text(text, dest_lang=dest_lang)
+        return text
+    else:
+        logging.error(f"Unsupported file format: {file_path}")
         return None
 
 def read_sql_file(file_path):
@@ -239,24 +272,6 @@ def read_json_file(file_path):
         return data
     except Exception as e:
         logging.error(f"Error reading JSON file: {e}")
-        return None
-
-def process_file(file_path):
-    """Process a file based on its extension."""
-    if file_path.endswith('.sql'):
-        return read_sql_file(file_path)
-    elif file_path.endswith('.txt'):
-        return read_text_file(file_path)
-    elif file_path.endswith('.csv'):
-        return read_csv_file(file_path)
-    elif file_path.endswith('.xlsx') or file_path.endswith('.xls'):
-        return read_excel_file(file_path)
-    elif file_path.endswith('.json'):
-        return read_json_file(file_path)
-    elif file_path.endswith('.png') or file_path.endswith('.jpg') or file_path.endswith('.jpeg'):
-        return extract_text_from_image(file_path)
-    else:
-        logging.error(f"Unsupported file format: {file_path}")
         return None
 
 def read_proxy_list(file_path):
@@ -813,6 +828,9 @@ def parse_arguments():
     parser.add_argument('--max_results', type=int, help='Maximum number of results to retrieve')
     parser.add_argument('--save_formats', type=str, help='Comma-separated list of formats to save data (txt, csv, json, html, xlsx, db)')
     parser.add_argument('--proxy', type=str, help='Proxy to use for scraping')
+    parser.add_argument('--ocr_lang', type=str, default='eng', help='Language for OCR (e.g., eng, fas, ara, chi_sim)')
+    parser.add_argument('--translate', action='store_true', help='Enable translation of extracted text')
+    parser.add_argument('--dest_lang', type=str, default='en', help='Destination language for translation (e.g., en, fa, ar, zh-cn)')
     return parser.parse_args()
 
 def get_proxies(proxy_input):
@@ -915,6 +933,9 @@ def main():
         max_results = args.max_results
         save_formats = args.save_formats.split(',') if args.save_formats else []
         proxy_input = args.proxy
+        ocr_lang = args.ocr_lang
+        translate = args.translate
+        dest_lang = args.dest_lang
 
         proxies = get_proxies(proxy_input) if proxy_input else []
 
