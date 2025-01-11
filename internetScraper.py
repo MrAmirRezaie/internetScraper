@@ -21,7 +21,6 @@ from bs4 import BeautifulSoup
 import nltk
 from nltk.sentiment import SentimentIntensityAnalyzer
 from dotenv import load_dotenv
-import pytesseract
 from PIL import Image
 from Crypto.Random import get_random_bytes
 import argparse
@@ -35,6 +34,8 @@ import requests
 import telebot
 from googletrans import Translator
 from cryptography.fernet import Fernet
+import tensorflow as tf
+from tensorflow.keras import layers, models
 
 # Check if .env file exists, if not, create it with a new encryption key
 if not os.path.exists('.env'):
@@ -93,12 +94,12 @@ REQUIRED_PACKAGES = [
     'nltk',
     'pycryptodome',
     'python-dotenv',
-    'pytesseract',
     'Pillow',
     'requests',
     'pyTelegramBotAPI',
     'googletrans==4.0.0-rc1',
-    'cryptography'
+    'cryptography',
+    'tensorflow'
 ]
 
 # Database configuration
@@ -246,15 +247,43 @@ def get_keys_from_telegram():
         logging.error(f"Error in Telegram bot polling: {e}")
         raise
 
-def extract_text_from_image(image_path, lang='eng'):
-    """Extract text from an image using OCR with support for multiple languages."""
+def build_custom_ocr_model():
+    """Build a custom OCR model using TensorFlow."""
+    input_image = layers.Input(shape=(64, 128, 1), name='input_image')
+    x = layers.Conv2D(32, (3, 3), activation='relu', padding='same')(input_image)
+    x = layers.MaxPooling2D((2, 2))(x)
+    x = layers.Conv2D(64, (3, 3), activation='relu', padding='same')(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+    x = layers.Flatten()(x)
+    x = layers.Dense(128, activation='relu')(x)
+    output = layers.Dense(10 * 62, activation='softmax')(x)
+    output = layers.Reshape((10, 62))(output)
+    model = models.Model(inputs=input_image, outputs=output)
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    return model
+
+def extract_text_with_custom_ocr(image_path, model):
+    """Extract text from an image using a custom OCR model."""
     try:
-        img = Image.open(image_path)
-        text = pytesseract.image_to_string(img, lang=lang)
+        img = Image.open(image_path).convert('L')
+        img = img.resize((128, 64))
+        img = np.array(img) / 255.0
+        img = np.expand_dims(img, axis=-1)
+        img = np.expand_dims(img, axis=0)
+        prediction = model.predict(img)
+        text = decode_prediction(prediction)
         return text
     except Exception as e:
-        logging.error(f"Error extracting text from image: {e}")
+        logging.error(f"Error extracting text with custom OCR: {e}")
         return None
+
+def decode_prediction(prediction):
+    """Decode the prediction from the custom OCR model."""
+    characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    text = ""
+    for i in range(prediction.shape[1]):
+        text += characters[np.argmax(prediction[0, i])]
+    return text
 
 def translate_text(text, src_lang='auto', dest_lang='en'):
     """Translate text from one language to another using Google Translate."""
@@ -279,7 +308,8 @@ def process_file(file_path, lang='eng', translate=False, dest_lang='en'):
     elif file_path.endswith('.json'):
         return read_json_file(file_path)
     elif file_path.endswith('.png') or file_path.endswith('.jpg') or file_path.endswith('.jpeg'):
-        text = extract_text_from_image(file_path, lang=lang)
+        model = build_custom_ocr_model()
+        text = extract_text_with_custom_ocr(file_path, model)
         if translate:
             text = translate_text(text, dest_lang=dest_lang)
         return text
