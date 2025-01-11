@@ -1,10 +1,6 @@
 import os
 import json
-import hashlib
 import logging
-from Crypto.Cipher import AES, DES3, Blowfish
-from Crypto.Util.Padding import pad, unpad
-import base64
 import time
 import csv
 from datetime import datetime, timedelta
@@ -15,13 +11,12 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
-from openpyxl import Workbook
-import numpy as np
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from bs4 import BeautifulSoup
 import nltk
 from nltk.sentiment import SentimentIntensityAnalyzer
@@ -35,8 +30,9 @@ import string
 from collections import defaultdict
 import subprocess
 import sqlite3
-import pkg_resources
+import importlib.metadata
 import requests
+import telebot
 
 # Load environment variables from .env file
 load_dotenv()
@@ -51,6 +47,10 @@ logging.basicConfig(
     ]
 )
 
+# Telegram bot token and API URL
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', 'YOUR_TELEGRAM_BOT_TOKEN')
+TELEGRAM_API_URL = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/'
+
 # Paths and URLs
 CHROME_DRIVER_PATH = os.getenv('CHROME_DRIVER_PATH', 'chromedriver.exe')
 TELEGRAM_WEB_URL = 'https://web.telegram.org/'
@@ -61,9 +61,9 @@ GOOGLE_SEARCH_URL = 'https://www.google.com/search?q='
 OUTPUT_FOLDER = os.getenv('OUTPUT_FOLDER', 'output')
 
 # Security keys and base URL
-SEC_KEY = os.getenv('SEC_KEY', 'default_secret_key')
-PUB_KEY = os.getenv('PUB_KEY', 'default_public_key')
-BASE_URL = os.getenv('BASE_URL', 'https://mramirrezaie.ir/api.php')
+SEC_KEY = None
+PUB_KEY = None
+BASE_URL = TELEGRAM_API_URL
 
 # Set random seed and plot style
 np.random.seed(0)
@@ -84,15 +84,9 @@ REQUIRED_PACKAGES = [
     'python-dotenv',
     'pytesseract',
     'Pillow',
-    'requests'
+    'requests',
+    'pyTelegramBotAPI'
 ]
-
-# Admin credentials
-ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
-ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')
-ADMIN_CODE_FILE = "admin_codes.json"
-ADMIN_KEYS_FILE = 'admin_keys.json'
-ADMIN_CODES_FILE = 'admin_codes.json'
 
 # Database configuration
 DATABASE_FILE = 'internet_scraper.db'
@@ -128,20 +122,55 @@ class User(Base):
     is_admin = Column(Boolean, default=False)
     expiry_date = Column(DateTime)
 
+class AdminKey(Base):
+    __tablename__ = 'admin_keys'
+    id = Column(Integer, primary_key=True)
+    pub_key = Column(String, unique=True)
+    sec_key = Column(String, unique=True)
+    expiry_date = Column(DateTime)
+    user_id = Column(Integer, ForeignKey('users.id'))
+    user = relationship("User")
+
 Base.metadata.create_all(engine)
 
 def install_packages():
     """Install required packages."""
     for package in REQUIRED_PACKAGES:
         try:
-            pkg_resources.require(package)
+            importlib.metadata.distribution(package)
             logging.info(f"{package} is already installed.")
-        except pkg_resources.DistributionNotFound:
+        except importlib.metadata.PackageNotFoundError:
             logging.info(f"{package} is not installed. Installing...")
             subprocess.check_call(['pip', 'install', package])
             logging.info(f"{package} has been installed.")
         except Exception as e:
             logging.error(f"Error installing {package}: {e}")
+
+def get_keys_from_telegram():
+    """Get PUB_KEY and SEC_KEY from Telegram bot."""
+    global SEC_KEY, PUB_KEY
+    bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+
+    @bot.message_handler(commands=['start'])
+    def send_welcome(message):
+        bot.reply_to(message, "Please send your PUBLIC KEY.")
+
+    @bot.message_handler(func=lambda message: True)
+    def handle_message(message):
+        global SEC_KEY, PUB_KEY
+        if not PUB_KEY:
+            PUB_KEY = message.text
+            bot.reply_to(message, "Please send your SECRET KEY.")
+        elif not SEC_KEY:
+            SEC_KEY = message.text
+            bot.reply_to(message, "Keys received. You can now use the scraper.")
+            bot.stop_polling()
+
+    try:
+        bot.polling()
+    except Exception as e:
+        logging.error(f"Error in Telegram bot polling: {e}")
+        raise
 
 def extract_text_from_image(image_path):
     """Extract text from an image using OCR."""
@@ -789,22 +818,18 @@ def main():
 
         proxies = get_proxies(proxy_input) if proxy_input else []
 
-        public_key = input("Enter your public key: ")
-        secret_key = input("Enter your secret key: ")
+        # Get PUB_KEY and SEC_KEY from Telegram bot
+        get_keys_from_telegram()
+
         username = input("Enter your username: ")
 
-        # بررسی اینکه نام کاربری وارد شده است
-        if not username:
-            logging.error("Username is required. Exiting...")
-            exit()
-
         # Check if API keys are provided
-        if not public_key or not secret_key:
+        if not PUB_KEY or not SEC_KEY:
             logging.error("Public key or secret key is missing. Exiting...")
             exit()
 
         # Validate API keys
-        if not check_api_keys(public_key, secret_key, username):
+        if not check_api_keys(PUB_KEY, SEC_KEY, username):
             logging.error("Invalid API keys or username. Exiting...")
             exit()
 
