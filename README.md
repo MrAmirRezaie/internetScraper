@@ -123,9 +123,9 @@ We prioritize the security and privacy of your data:
 ## 📞 Contact
 
 For questions, feedback, or bug reports, contact the maintainer:
-- **Email**: developer@example.com
-- **Telegram**: [@developer_handle](https://t.me/MrAmirRezaie)
-- **GitHub**: [GitHub Repository](https://github.com/MrAmirRezaie/internetScraper)
+- **Email**: MrAmirRezaie70@gmail.com
+- **Telegram**: [@MrAmirRezaie](https://t.me/MrAmirRezaie)
+- **GitHub**: [internetScraper](https://github.com/MrAmirRezaie/internetScraper)
 
 ---
 
