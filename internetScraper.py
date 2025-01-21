@@ -176,26 +176,42 @@ def encrypt_data(data):
     """Encrypt data using Fernet symmetric encryption.
 
     Args:
-        data (str or bytes): The data to encrypt.
+        data (str or bytes): The data to encrypt. If the data is a string, it will be encoded to bytes.
 
     Returns:
         str: The encrypted data as a string.
+
+    Raises:
+        Exception: If encryption fails due to invalid input or other issues.
     """
     if isinstance(data, str):
         data = data.encode()
-    return cipher_suite.encrypt(data).decode()
+    try:
+        encrypted_data = cipher_suite.encrypt(data)
+        return encrypted_data.decode()
+    except Exception as e:
+        logging.error(f"Error encrypting data: {e}")
+        raise
 
 
 def decrypt_data(encrypted_data):
     """Decrypt data using Fernet symmetric encryption.
 
     Args:
-        encrypted_data (str): The encrypted data to decrypt.
+        encrypted_data (str): The encrypted data to decrypt. It should be a string.
 
     Returns:
         str: The decrypted data as a string.
+
+    Raises:
+        Exception: If decryption fails due to invalid input or other issues.
     """
-    return cipher_suite.decrypt(encrypted_data.encode()).decode()
+    try:
+        decrypted_data = cipher_suite.decrypt(encrypted_data.encode())
+        return decrypted_data.decode()
+    except Exception as e:
+        logging.error(f"Error decrypting data: {e}")
+        raise
 
 
 def generate_username_password():
@@ -203,6 +219,12 @@ def generate_username_password():
 
     Returns:
         tuple: A tuple containing the generated username and password.
+              The username is a 10-character string consisting of letters and digits.
+              The password is a 12-character string consisting of letters, digits, and punctuation.
+
+    Example:
+        >>> generate_username_password()
+        ('aBc123dEf4', 'p@ssw0rd!123')
     """
     username = ''.join(np.random.choice(list(string.ascii_letters + string.digits), size=10))
     password = ''.join(np.random.choice(list(string.ascii_letters + string.digits + string.punctuation), size=12))
@@ -218,6 +240,9 @@ def add_user_with_keys(pub_key, sec_key):
 
     Returns:
         tuple: A tuple containing the generated username and password.
+
+    Raises:
+        Exception: If adding the user or saving the keys fails.
     """
     try:
         username, password = generate_username_password()
@@ -251,7 +276,14 @@ def add_user_with_keys(pub_key, sec_key):
 
 
 def delete_expired_users():
-    """Delete users whose expiry date has passed."""
+    """Delete users whose expiry date has passed.
+
+    This function queries the database for users whose expiry date is before the current date
+    and deletes them from the database.
+
+    Raises:
+        Exception: If deleting users fails.
+    """
     try:
         expired_users = session.query(User).filter(User.expiry_date < datetime.now()).all()
         for user in expired_users:
@@ -271,7 +303,10 @@ def check_user_credentials(username, password):
         password (str): The password to check.
 
     Returns:
-        bool: True if the credentials are valid, False otherwise.
+        bool: True if the credentials are valid and the user has not expired, False otherwise.
+
+    Raises:
+        Exception: If checking credentials fails.
     """
     try:
         user = session.query(User).filter(User.username == username).first()
@@ -292,7 +327,14 @@ def check_user_credentials(username, password):
 
 
 def install_packages():
-    """Install required packages."""
+    """Install required packages listed in REQUIRED_PACKAGES.
+
+    This function checks if each package in REQUIRED_PACKAGES is already installed.
+    If not, it installs the package using pip.
+
+    Raises:
+        Exception: If installation of any package fails.
+    """
     for package in REQUIRED_PACKAGES:
         try:
             importlib.metadata.distribution(package)
@@ -306,7 +348,14 @@ def install_packages():
 
 
 def get_keys_from_telegram():
-    """Get PUB_KEY and SEC_KEY from Telegram bot."""
+    """Get PUB_KEY and SEC_KEY from Telegram bot.
+
+    This function initializes a Telegram bot and waits for the user to send the public and secret keys.
+    Once both keys are received, the bot stops polling.
+
+    Raises:
+        Exception: If initializing the bot or polling fails.
+    """
     global SEC_KEY, PUB_KEY
     try:
         bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
@@ -340,6 +389,9 @@ def get_keys_from_telegram():
 def build_custom_ocr_model():
     """Build a custom OCR model using TensorFlow.
 
+    This function creates a convolutional neural network (CNN) model for optical character recognition (OCR).
+    The model takes an input image of shape (64, 128, 1) and outputs a sequence of characters.
+
     Returns:
         tf.keras.Model: The compiled OCR model.
     """
@@ -366,6 +418,9 @@ def extract_text_with_custom_ocr(image_path, model):
 
     Returns:
         str: The extracted text.
+
+    Raises:
+        Exception: If text extraction fails due to invalid image or model.
     """
     try:
         img = Image.open(image_path).convert('L')
@@ -407,6 +462,9 @@ def translate_text(text, src_lang='auto', dest_lang='en'):
 
     Returns:
         str: The translated text.
+
+    Raises:
+        Exception: If translation fails due to invalid input or API issues.
     """
     try:
         translator = Translator()
@@ -428,6 +486,9 @@ def process_file(file_path, lang='eng', translate=False, dest_lang='en'):
 
     Returns:
         str or dict: The processed data, depending on the file type.
+
+    Raises:
+        Exception: If processing the file fails due to unsupported format or other issues.
     """
     if file_path.endswith('.sql'):
         return read_sql_file(file_path)
@@ -457,7 +518,10 @@ def read_sql_file(file_path):
         file_path (str): The path to the SQL file.
 
     Returns:
-        dict: A dictionary containing the data from the SQL file.
+        dict: A dictionary containing the data from the SQL file, where keys are table names and values are lists of rows.
+
+    Raises:
+        Exception: If reading the SQL file fails.
     """
     try:
         conn = sqlite3.connect(file_path)
@@ -485,6 +549,9 @@ def read_text_file(file_path):
 
     Returns:
         str: The content of the text file.
+
+    Raises:
+        Exception: If reading the text file fails.
     """
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -502,7 +569,10 @@ def read_csv_file(file_path):
         file_path (str): The path to the CSV file.
 
     Returns:
-        list: A list of dictionaries containing the data from the CSV file.
+        list: A list of dictionaries containing the data from the CSV file, where each dictionary represents a row.
+
+    Raises:
+        Exception: If reading the CSV file fails.
     """
     try:
         df = pd.read_csv(file_path)
@@ -519,7 +589,10 @@ def read_excel_file(file_path):
         file_path (str): The path to the Excel file.
 
     Returns:
-        list: A list of dictionaries containing the data from the Excel file.
+        list: A list of dictionaries containing the data from the Excel file, where each dictionary represents a row.
+
+    Raises:
+        Exception: If reading the Excel file fails.
     """
     try:
         df = pd.read_excel(file_path)
@@ -537,6 +610,9 @@ def read_json_file(file_path):
 
     Returns:
         dict: A dictionary containing the data from the JSON file.
+
+    Raises:
+        Exception: If reading the JSON file fails.
     """
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -555,6 +631,9 @@ def read_proxy_list(file_path):
 
     Returns:
         list: A list of proxies.
+
+    Raises:
+        Exception: If reading the proxy list fails.
     """
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -573,6 +652,9 @@ def setup_driver(proxy=None):
 
     Returns:
         webdriver.Chrome: The configured WebDriver instance.
+
+    Raises:
+        Exception: If setting up the WebDriver fails.
     """
     try:
         service = Service(CHROME_DRIVER_PATH)
@@ -607,6 +689,9 @@ def login_to_telegram(driver, phone_number):
     Args:
         driver (webdriver.Chrome): The WebDriver instance.
         phone_number (str): The phone number to use for login.
+
+    Raises:
+        TimeoutException: If logging into Telegram fails due to timeout.
     """
     try:
         driver.get(TELEGRAM_WEB_URL)
@@ -639,6 +724,9 @@ def search_telegram(driver, username, keywords, start_date, end_date, max_result
 
     Returns:
         list: A list of dictionaries containing message details.
+
+    Raises:
+        TimeoutException: If searching Telegram fails due to timeout.
     """
     try:
         search_box = WebDriverWait(driver, 10).until(
@@ -718,6 +806,9 @@ def search_twitter(username, keywords, start_date, end_date, max_results):
 
     Returns:
         list: A list of dictionaries containing tweet details.
+
+    Raises:
+        Exception: If searching Twitter fails.
     """
     try:
         driver = setup_driver()
@@ -781,6 +872,9 @@ def search_instagram(username, keywords, start_date, end_date, max_results):
 
     Returns:
         list: A list of dictionaries containing post details.
+
+    Raises:
+        Exception: If searching Instagram fails.
     """
     try:
         driver = setup_driver()
@@ -843,6 +937,9 @@ def search_facebook(username, keywords, start_date, end_date, max_results):
 
     Returns:
         list: A list of dictionaries containing post details.
+
+    Raises:
+        Exception: If searching Facebook fails.
     """
     try:
         driver = setup_driver()
@@ -904,6 +1001,9 @@ def search_linkedin(username, keywords, start_date, end_date, max_results):
 
     Returns:
         list: A list of dictionaries containing post details.
+
+    Raises:
+        Exception: If searching LinkedIn fails.
     """
     try:
         driver = setup_driver()
@@ -966,6 +1066,9 @@ def search_reddit(username, keywords, start_date, end_date, max_results):
 
     Returns:
         list: A list of dictionaries containing post details.
+
+    Raises:
+        Exception: If searching Reddit fails.
     """
     try:
         driver = setup_driver()
@@ -1027,6 +1130,9 @@ def search_google(username, keywords, start_date, end_date, max_results):
 
     Returns:
         list: A list of dictionaries containing search result details.
+
+    Raises:
+        Exception: If searching Google fails.
     """
     try:
         driver = setup_driver()
@@ -1089,6 +1195,9 @@ def search_google_scholar(username, keywords, start_date, end_date, max_results)
 
     Returns:
         list: A list of dictionaries containing search result details.
+
+    Raises:
+        Exception: If searching Google Scholar fails.
     """
     try:
         driver = setup_driver()
@@ -1151,6 +1260,9 @@ def search_public_databases(username, keywords, start_date, end_date, max_result
 
     Returns:
         list: A list of dictionaries containing database entry details.
+
+    Raises:
+        Exception: If searching public databases fails.
     """
     try:
         results = []
@@ -1186,6 +1298,9 @@ def search_private_databases(username, keywords, start_date, end_date, max_resul
 
     Returns:
         list: A list of dictionaries containing database entry details.
+
+    Raises:
+        Exception: If searching private databases fails.
     """
     try:
         results = []
@@ -1221,6 +1336,9 @@ def search_email(email, keywords, start_date, end_date, max_results):
 
     Returns:
         list: A list of dictionaries containing email entry details.
+
+    Raises:
+        Exception: If searching for email fails.
     """
     try:
         results = []
@@ -1256,6 +1374,9 @@ def search_user_id(user_id, keywords, start_date, end_date, max_results):
 
     Returns:
         list: A list of dictionaries containing user ID entry details.
+
+    Raises:
+        Exception: If searching for user ID fails.
     """
     try:
         results = []
@@ -1291,6 +1412,9 @@ def search_national_id(national_id, keywords, start_date, end_date, max_results)
 
     Returns:
         list: A list of dictionaries containing national ID entry details.
+
+    Raises:
+        Exception: If searching for national ID fails.
     """
     try:
         results = []
@@ -1326,6 +1450,9 @@ def search_passport_number(passport_number, keywords, start_date, end_date, max_
 
     Returns:
         list: A list of dictionaries containing passport number entry details.
+
+    Raises:
+        Exception: If searching for passport number fails.
     """
     try:
         results = []
@@ -1361,6 +1488,9 @@ def search_account_number(account_number, keywords, start_date, end_date, max_re
 
     Returns:
         list: A list of dictionaries containing account number entry details.
+
+    Raises:
+        Exception: If searching for account number fails.
     """
     try:
         results = []
@@ -1396,6 +1526,9 @@ def search_image(image_path, keywords, start_date, end_date, max_results):
 
     Returns:
         list: A list of dictionaries containing image entry details.
+
+    Raises:
+        Exception: If searching for image fails.
     """
     try:
         results = []
@@ -1431,6 +1564,9 @@ def search_audio(audio_path, keywords, start_date, end_date, max_results):
 
     Returns:
         list: A list of dictionaries containing audio entry details.
+
+    Raises:
+        Exception: If searching for audio fails.
     """
     try:
         results = []
@@ -1462,6 +1598,9 @@ def extract_metadata(file_path):
 
     Returns:
         dict: A dictionary containing metadata.
+
+    Raises:
+        Exception: If extracting metadata fails.
     """
     try:
         if file_path.endswith('.jpg') or file_path.endswith('.jpeg') or file_path.endswith('.png'):
@@ -1490,6 +1629,9 @@ def save_to_database(data, username):
     Args:
         data (list): A list of dictionaries containing data to save.
         username (str): The username associated with the data.
+
+    Raises:
+        Exception: If saving data to the database fails.
     """
     try:
         for item in data:
@@ -1516,6 +1658,9 @@ def save_to_txt(data, username):
     Args:
         data (list): A list of dictionaries containing data to save.
         username (str): The username associated with the data.
+
+    Raises:
+        Exception: If saving data to text file fails.
     """
     try:
         user_folder = os.path.join(OUTPUT_FOLDER, username)
@@ -1542,6 +1687,9 @@ def save_to_csv(data, username):
     Args:
         data (list): A list of dictionaries containing data to save.
         username (str): The username associated with the data.
+
+    Raises:
+        Exception: If saving data to CSV file fails.
     """
     try:
         user_folder = os.path.join(OUTPUT_FOLDER, username)
@@ -1560,6 +1708,9 @@ def save_to_json(data, username):
     Args:
         data (list): A list of dictionaries containing data to save.
         username (str): The username associated with the data.
+
+    Raises:
+        Exception: If saving data to JSON file fails.
     """
     try:
         user_folder = os.path.join(OUTPUT_FOLDER, username)
@@ -1578,6 +1729,9 @@ def save_to_html(data, username):
     Args:
         data (list): A list of dictionaries containing data to save.
         username (str): The username associated with the data.
+
+    Raises:
+        Exception: If saving data to HTML file fails.
     """
     try:
         user_folder = os.path.join(OUTPUT_FOLDER, username)
@@ -1605,6 +1759,9 @@ def save_to_excel(data, username):
     Args:
         data (list): A list of dictionaries containing data to save.
         username (str): The username associated with the data.
+
+    Raises:
+        Exception: If saving data to Excel file fails.
     """
     try:
         user_folder = os.path.join(OUTPUT_FOLDER, username)
@@ -1623,6 +1780,9 @@ def visualize_data(data, username):
     Args:
         data (list): A list of dictionaries containing data to visualize.
         username (str): The username associated with the data.
+
+    Raises:
+        Exception: If visualizing data fails.
     """
     try:
         df = pd.DataFrame(data)
@@ -1646,6 +1806,9 @@ def analyze_sentiment(text):
 
     Returns:
         dict: A dictionary containing sentiment scores.
+
+    Raises:
+        Exception: If analyzing sentiment fails.
     """
     try:
         sia = SentimentIntensityAnalyzer()
@@ -1710,6 +1873,9 @@ def check_api_keys(public_key, secret_key, username):
 
     Returns:
         bool: True if the keys are valid, False otherwise.
+
+    Raises:
+        Exception: If checking API keys fails.
     """
     if not public_key or not secret_key or not username:
         logging.error("Public key, secret key, or username is missing.")
@@ -1748,6 +1914,9 @@ def read_admin_code_from_file():
 
     Returns:
         str: The encrypted admin code.
+
+    Raises:
+        Exception: If reading the admin code file fails.
     """
     try:
         if not os.path.exists(ADMIN_CODE_FILE):
@@ -1775,7 +1944,13 @@ def verify_code_format(code, username):
 
 
 def delete_client_files():
-    """Delete client files in case of invalid admin code."""
+    """Delete client files in case of invalid admin code.
+
+    This function deletes the admin code file, admin keys file, and admin codes file.
+
+    Raises:
+        Exception: If deleting client files fails.
+    """
     try:
         if os.path.exists(ADMIN_CODE_FILE):
             os.remove(ADMIN_CODE_FILE)
@@ -1796,6 +1971,9 @@ def validate_script_with_api(script_content):
 
     Returns:
         tuple: A tuple containing a boolean indicating validity and a message.
+
+    Raises:
+        Exception: If validating script with API fails.
     """
     try:
         response = requests.post(
@@ -1815,6 +1993,11 @@ def validate_script_with_api(script_content):
 
 
 def main():
+    """Main function to execute the internet scraper.
+
+    This function parses command line arguments, installs required packages, sets up proxies,
+    retrieves API keys, validates them, and performs the scraping operation based on the provided arguments.
+    """
     try:
         args = parse_arguments()
 
@@ -1946,4 +2129,8 @@ def main():
 
 
 if __name__ == '__main__':
+    """Entry point of the script.
+
+    This block ensures that the main function is called when the script is executed directly.
+    """
     main()
