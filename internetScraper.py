@@ -36,6 +36,13 @@ from googletrans import Translator
 from cryptography.fernet import Fernet
 import tensorflow as tf
 from tensorflow.keras import layers, models
+import cv2
+import face_recognition
+import speech_recognition as sr
+from pydub import AudioSegment
+import exifread
+import hashlib
+import scholarly
 
 # Check if .env file exists, if not, create it with a new encryption key
 if not os.path.exists('.env'):
@@ -58,7 +65,11 @@ logging.basicConfig(
 )
 
 # Telegram bot token and API URL
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', 'YOUR_TELEGRAM_BOT_TOKEN')
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '8031081459:AAGxY7kF-T-uDbGrc8txnnZhKbdZndkOiWc')
+if not TELEGRAM_BOT_TOKEN or ':' not in TELEGRAM_BOT_TOKEN:
+    logging.error("Invalid Telegram bot token. Please check your .env file.")
+    exit()
+
 TELEGRAM_API_URL = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/'
 
 # Paths and URLs
@@ -70,6 +81,7 @@ FACEBOOK_URL = 'https://www.facebook.com/'
 LINKEDIN_URL = 'https://www.linkedin.com/'
 REDDIT_URL = 'https://www.reddit.com/'
 GOOGLE_SEARCH_URL = 'https://www.google.com/search?q='
+GOOGLE_SCHOLAR_URL = 'https://scholar.google.com/scholar?q='
 OUTPUT_FOLDER = os.getenv('OUTPUT_FOLDER', 'output')
 
 # Security keys and base URL
@@ -99,7 +111,13 @@ REQUIRED_PACKAGES = [
     'pyTelegramBotAPI',
     'googletrans==4.0.0-rc1',
     'cryptography',
-    'tensorflow'
+    'tensorflow',
+    'opencv-python',
+    'face-recognition',
+    'SpeechRecognition',
+    'pydub',
+    'exifread',
+    'scholarly'
 ]
 
 # Database configuration
@@ -159,23 +177,43 @@ def decrypt_data(encrypted_data):
     """Decrypt data using Fernet symmetric encryption."""
     return cipher_suite.decrypt(encrypted_data.encode()).decode()
 
-def add_user(username, password, is_admin=False, expiry_days=30):
-    """Add a new user to the database with encrypted password."""
+def generate_username_password():
+    """Generate a random username and password."""
+    username = ''.join(np.random.choice(list(string.ascii_letters + string.digits), size=10))
+    password = ''.join(np.random.choice(list(string.ascii_letters + string.digits + string.punctuation), size=12))
+    return username, password
+
+def add_user_with_keys(pub_key, sec_key):
+    """Add a new user with generated username and password."""
     try:
-        expiry_date = datetime.now() + timedelta(days=expiry_days)
+        username, password = generate_username_password()
+        expiry_date = datetime.now() + timedelta(days=30)
         password_hash = encrypt_data(password)
         user = User(
             username=username,
             password_hash=password_hash,
-            is_admin=is_admin,
+            is_admin=False,
             expiry_date=expiry_date
         )
         session.add(user)
         session.commit()
-        logging.info(f"User {username} added successfully.")
+
+        # Save the keys in the admin_keys table
+        admin_key = AdminKey(
+            pub_key=pub_key,
+            sec_key=sec_key,
+            expiry_date=expiry_date,
+            user_id=user.id
+        )
+        session.add(admin_key)
+        session.commit()
+
+        logging.info(f"User {username} added successfully with password: {password}")
+        return username, password
     except Exception as e:
-        logging.error(f"Error adding user {username}: {e}")
+        logging.error(f"Error adding user: {e}")
         session.rollback()
+        return None, None
 
 def delete_expired_users():
     """Delete users whose expiry date has passed."""
@@ -224,7 +262,12 @@ def install_packages():
 def get_keys_from_telegram():
     """Get PUB_KEY and SEC_KEY from Telegram bot."""
     global SEC_KEY, PUB_KEY
-    bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+    try:
+        bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+        logging.info("Telegram bot initialized successfully.")
+    except Exception as e:
+        logging.error(f"Error initializing Telegram bot: {e}")
+        raise
 
     @bot.message_handler(commands=['start'])
     def send_welcome(message):
@@ -796,6 +839,285 @@ def search_google(username, keywords, start_date, end_date, max_results):
     finally:
         driver.quit()
 
+def search_google_scholar(username, keywords, start_date, end_date, max_results):
+    """Search Google Scholar for results related to a specific user."""
+    try:
+        driver = setup_driver()
+        driver.get(f"{GOOGLE_SCHOLAR_URL}{username}")
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, '//div[@class="gs_r"]'))
+        )
+        results = []
+        search_results = driver.find_elements(By.XPATH, '//div[@class="gs_r"]')
+        for result in search_results:
+            try:
+                title = result.find_element(By.XPATH, './/h3[@class="gs_rt"]').text
+                link = result.find_element(By.XPATH, './/h3[@class="gs_rt"]/a').get_attribute('href')
+                result_date = datetime.now()
+
+                if start_date and end_date:
+                    start = datetime.strptime(start_date, '%Y-%m-%d')
+                    end = datetime.strptime(end_date, '%Y-%m-%d')
+                    if not (start <= result_date <= end):
+                        continue
+
+                if keywords:
+                    if not any(keyword.lower() in title.lower() for keyword in keywords):
+                        continue
+
+                results.append({
+                    'platform': 'Google Scholar',
+                    'username': username,
+                    'content': title,
+                    'content_type': 'search_result',
+                    'date': result_date.strftime('%Y-%m-%d %H:%M:%S'),
+                    'url': link,
+                    'interaction_user': username
+                })
+
+                if max_results and len(results) >= max_results:
+                    break
+
+            except NoSuchElementException as e:
+                logging.warning(f"Error extracting search result: {e}")
+
+        logging.info(f"Extracted {len(results)} search results from Google Scholar for user {username}.")
+        return results
+    except Exception as e:
+        logging.error(f"Error searching Google Scholar for user {username}: {e}")
+        return []
+    finally:
+        driver.quit()
+
+def search_public_databases(username, keywords, start_date, end_date, max_results):
+    """Search public databases for information related to a specific user."""
+    try:
+        results = []
+        # Example: Search in a public database (e.g., a government database)
+        # This is a placeholder and should be replaced with actual database queries
+        if keywords:
+            results.append({
+                'platform': 'Public Database',
+                'username': username,
+                'content': f"Information related to {username} and keywords {keywords}",
+                'content_type': 'database_entry',
+                'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'url': 'https://example.com',
+                'interaction_user': username
+            })
+
+        logging.info(f"Extracted {len(results)} results from public databases for user {username}.")
+        return results
+    except Exception as e:
+        logging.error(f"Error searching public databases for user {username}: {e}")
+        return []
+
+def search_private_databases(username, keywords, start_date, end_date, max_results):
+    """Search private databases for information related to a specific user."""
+    try:
+        results = []
+        # Example: Search in a private database (e.g., a corporate database)
+        # This is a placeholder and should be replaced with actual database queries
+        if keywords:
+            results.append({
+                'platform': 'Private Database',
+                'username': username,
+                'content': f"Information related to {username} and keywords {keywords}",
+                'content_type': 'database_entry',
+                'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'url': 'https://example.com',
+                'interaction_user': username
+            })
+
+        logging.info(f"Extracted {len(results)} results from private databases for user {username}.")
+        return results
+    except Exception as e:
+        logging.error(f"Error searching private databases for user {username}: {e}")
+        return []
+
+def search_email(email, keywords, start_date, end_date, max_results):
+    """Search for information related to a specific email address."""
+    try:
+        results = []
+        # Example: Search for email in public databases or social media
+        # This is a placeholder and should be replaced with actual search logic
+        if keywords:
+            results.append({
+                'platform': 'Email Search',
+                'username': email,
+                'content': f"Information related to {email} and keywords {keywords}",
+                'content_type': 'email_entry',
+                'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'url': 'https://example.com',
+                'interaction_user': email
+            })
+
+        logging.info(f"Extracted {len(results)} results for email {email}.")
+        return results
+    except Exception as e:
+        logging.error(f"Error searching for email {email}: {e}")
+        return []
+
+def search_user_id(user_id, keywords, start_date, end_date, max_results):
+    """Search for information related to a specific user ID."""
+    try:
+        results = []
+        # Example: Search for user ID in public databases or social media
+        # This is a placeholder and should be replaced with actual search logic
+        if keywords:
+            results.append({
+                'platform': 'User ID Search',
+                'username': user_id,
+                'content': f"Information related to {user_id} and keywords {keywords}",
+                'content_type': 'user_id_entry',
+                'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'url': 'https://example.com',
+                'interaction_user': user_id
+            })
+
+        logging.info(f"Extracted {len(results)} results for user ID {user_id}.")
+        return results
+    except Exception as e:
+        logging.error(f"Error searching for user ID {user_id}: {e}")
+        return []
+
+def search_national_id(national_id, keywords, start_date, end_date, max_results):
+    """Search for information related to a specific national ID."""
+    try:
+        results = []
+        # Example: Search for national ID in public databases
+        # This is a placeholder and should be replaced with actual search logic
+        if keywords:
+            results.append({
+                'platform': 'National ID Search',
+                'username': national_id,
+                'content': f"Information related to {national_id} and keywords {keywords}",
+                'content_type': 'national_id_entry',
+                'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'url': 'https://example.com',
+                'interaction_user': national_id
+            })
+
+        logging.info(f"Extracted {len(results)} results for national ID {national_id}.")
+        return results
+    except Exception as e:
+        logging.error(f"Error searching for national ID {national_id}: {e}")
+        return []
+
+def search_passport_number(passport_number, keywords, start_date, end_date, max_results):
+    """Search for information related to a specific passport number."""
+    try:
+        results = []
+        # Example: Search for passport number in public databases
+        # This is a placeholder and should be replaced with actual search logic
+        if keywords:
+            results.append({
+                'platform': 'Passport Number Search',
+                'username': passport_number,
+                'content': f"Information related to {passport_number} and keywords {keywords}",
+                'content_type': 'passport_number_entry',
+                'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'url': 'https://example.com',
+                'interaction_user': passport_number
+            })
+
+        logging.info(f"Extracted {len(results)} results for passport number {passport_number}.")
+        return results
+    except Exception as e:
+        logging.error(f"Error searching for passport number {passport_number}: {e}")
+        return []
+
+def search_account_number(account_number, keywords, start_date, end_date, max_results):
+    """Search for information related to a specific account number."""
+    try:
+        results = []
+        # Example: Search for account number in public databases
+        # This is a placeholder and should be replaced with actual search logic
+        if keywords:
+            results.append({
+                'platform': 'Account Number Search',
+                'username': account_number,
+                'content': f"Information related to {account_number} and keywords {keywords}",
+                'content_type': 'account_number_entry',
+                'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'url': 'https://example.com',
+                'interaction_user': account_number
+            })
+
+        logging.info(f"Extracted {len(results)} results for account number {account_number}.")
+        return results
+    except Exception as e:
+        logging.error(f"Error searching for account number {account_number}: {e}")
+        return []
+
+def search_image(image_path, keywords, start_date, end_date, max_results):
+    """Search for information related to a specific image."""
+    try:
+        results = []
+        # Example: Search for image in public databases or reverse image search
+        # This is a placeholder and should be replaced with actual search logic
+        if keywords:
+            results.append({
+                'platform': 'Image Search',
+                'username': image_path,
+                'content': f"Information related to image {image_path} and keywords {keywords}",
+                'content_type': 'image_entry',
+                'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'url': 'https://example.com',
+                'interaction_user': image_path
+            })
+
+        logging.info(f"Extracted {len(results)} results for image {image_path}.")
+        return results
+    except Exception as e:
+        logging.error(f"Error searching for image {image_path}: {e}")
+        return []
+
+def search_audio(audio_path, keywords, start_date, end_date, max_results):
+    """Search for information related to a specific audio file."""
+    try:
+        results = []
+        # Example: Search for audio in public databases or audio recognition
+        # This is a placeholder and should be replaced with actual search logic
+        if keywords:
+            results.append({
+                'platform': 'Audio Search',
+                'username': audio_path,
+                'content': f"Information related to audio {audio_path} and keywords {keywords}",
+                'content_type': 'audio_entry',
+                'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'url': 'https://example.com',
+                'interaction_user': audio_path
+            })
+
+        logging.info(f"Extracted {len(results)} results for audio {audio_path}.")
+        return results
+    except Exception as e:
+        logging.error(f"Error searching for audio {audio_path}: {e}")
+        return []
+
+def extract_metadata(file_path):
+    """Extract metadata from a file."""
+    try:
+        if file_path.endswith('.jpg') or file_path.endswith('.jpeg') or file_path.endswith('.png'):
+            with open(file_path, 'rb') as f:
+                tags = exifread.process_file(f)
+                return tags
+        elif file_path.endswith('.mp3') or file_path.endswith('.wav'):
+            audio = AudioSegment.from_file(file_path)
+            return {
+                'duration': len(audio),
+                'channels': audio.channels,
+                'frame_rate': audio.frame_rate,
+                'sample_width': audio.sample_width
+            }
+        else:
+            logging.error(f"Unsupported file format for metadata extraction: {file_path}")
+            return None
+    except Exception as e:
+        logging.error(f"Error extracting metadata from file {file_path}: {e}")
+        return None
+
 def save_to_database(data, username):
     """Save data to the SQLite database."""
     try:
@@ -931,6 +1253,13 @@ def parse_arguments():
     parser.add_argument('--ocr_lang', type=str, default='eng', help='Language for OCR (e.g., eng, fas, ara, chi_sim)')
     parser.add_argument('--translate', action='store_true', help='Enable translation of extracted text')
     parser.add_argument('--dest_lang', type=str, default='en', help='Destination language for translation (e.g., en, fa, ar, zh-cn)')
+    parser.add_argument('--email', type=str, help='Email address to search')
+    parser.add_argument('--user_id', type=str, help='User ID to search')
+    parser.add_argument('--national_id', type=str, help='National ID to search')
+    parser.add_argument('--passport_number', type=str, help='Passport number to search')
+    parser.add_argument('--account_number', type=str, help='Account number to search')
+    parser.add_argument('--image_path', type=str, help='Path to image file to search')
+    parser.add_argument('--audio_path', type=str, help='Path to audio file to search')
     return parser.parse_args()
 
 def get_proxies(proxy_input):
@@ -1036,13 +1365,18 @@ def main():
         ocr_lang = args.ocr_lang
         translate = args.translate
         dest_lang = args.dest_lang
+        email = args.email
+        user_id = args.user_id
+        national_id = args.national_id
+        passport_number = args.passport_number
+        account_number = args.account_number
+        image_path = args.image_path
+        audio_path = args.audio_path
 
         proxies = get_proxies(proxy_input) if proxy_input else []
 
         # Get PUB_KEY and SEC_KEY from Telegram bot
         get_keys_from_telegram()
-
-        username = input("Enter your username: ")
 
         # Check if API keys are provided
         if not PUB_KEY or not SEC_KEY:
@@ -1050,9 +1384,20 @@ def main():
             exit()
 
         # Validate API keys
+        username = input("Enter your username: ")
         if not check_api_keys(PUB_KEY, SEC_KEY, username):
             logging.error("Invalid API keys or username. Exiting...")
             exit()
+
+        # Generate and save username and password
+        generated_username, generated_password = add_user_with_keys(PUB_KEY, SEC_KEY)
+        if not generated_username or not generated_password:
+            logging.error("Failed to generate username and password. Exiting...")
+            exit()
+
+        print(f"Your username: {generated_username}")
+        print(f"Your password: {generated_password}")
+        print("Please save these credentials securely. They will not be shown again.")
 
         encrypted_code = read_admin_code_from_file()
         if not encrypted_code or not verify_code_format(encrypted_code, username):
@@ -1082,6 +1427,26 @@ def main():
                     all_data.extend(search_reddit(username, keywords, start_date, end_date, max_results))
                 if 'Google' in platforms:
                     all_data.extend(search_google(username, keywords, start_date, end_date, max_results))
+                if 'Google Scholar' in platforms:
+                    all_data.extend(search_google_scholar(username, keywords, start_date, end_date, max_results))
+                if 'Public Databases' in platforms:
+                    all_data.extend(search_public_databases(username, keywords, start_date, end_date, max_results))
+                if 'Private Databases' in platforms:
+                    all_data.extend(search_private_databases(username, keywords, start_date, end_date, max_results))
+                if email:
+                    all_data.extend(search_email(email, keywords, start_date, end_date, max_results))
+                if user_id:
+                    all_data.extend(search_user_id(user_id, keywords, start_date, end_date, max_results))
+                if national_id:
+                    all_data.extend(search_national_id(national_id, keywords, start_date, end_date, max_results))
+                if passport_number:
+                    all_data.extend(search_passport_number(passport_number, keywords, start_date, end_date, max_results))
+                if account_number:
+                    all_data.extend(search_account_number(account_number, keywords, start_date, end_date, max_results))
+                if image_path:
+                    all_data.extend(search_image(image_path, keywords, start_date, end_date, max_results))
+                if audio_path:
+                    all_data.extend(search_audio(audio_path, keywords, start_date, end_date, max_results))
 
                 # Validate script using API
                 for item in all_data:
