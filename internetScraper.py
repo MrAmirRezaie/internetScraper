@@ -137,6 +137,7 @@ engine = create_engine(f'sqlite:///{DATABASE_FILE}')
 Session = sessionmaker(bind=engine)
 session = Session()
 
+
 class ScrapedData(Base):
     __tablename__ = 'scraped_data'
     id = Column(Integer, primary_key=True)
@@ -148,6 +149,7 @@ class ScrapedData(Base):
     url = Column(String)
     interaction_user = Column(String)
 
+
 class User(Base):
     __tablename__ = 'users'
     id = Column(Integer, primary_key=True)
@@ -155,6 +157,7 @@ class User(Base):
     password_hash = Column(String)
     is_admin = Column(Boolean, default=False)
     expiry_date = Column(DateTime)
+
 
 class AdminKey(Base):
     __tablename__ = 'admin_keys'
@@ -165,26 +168,57 @@ class AdminKey(Base):
     user_id = Column(Integer, ForeignKey('users.id'))
     user = relationship("User")
 
+
 Base.metadata.create_all(engine)
 
+
 def encrypt_data(data):
-    """Encrypt data using Fernet symmetric encryption."""
+    """Encrypt data using Fernet symmetric encryption.
+
+    Args:
+        data (str or bytes): The data to encrypt.
+
+    Returns:
+        str: The encrypted data as a string.
+    """
     if isinstance(data, str):
         data = data.encode()
     return cipher_suite.encrypt(data).decode()
 
+
 def decrypt_data(encrypted_data):
-    """Decrypt data using Fernet symmetric encryption."""
+    """Decrypt data using Fernet symmetric encryption.
+
+    Args:
+        encrypted_data (str): The encrypted data to decrypt.
+
+    Returns:
+        str: The decrypted data as a string.
+    """
     return cipher_suite.decrypt(encrypted_data.encode()).decode()
 
+
 def generate_username_password():
-    """Generate a random username and password."""
+    """Generate a random username and password.
+
+    Returns:
+        tuple: A tuple containing the generated username and password.
+    """
     username = ''.join(np.random.choice(list(string.ascii_letters + string.digits), size=10))
     password = ''.join(np.random.choice(list(string.ascii_letters + string.digits + string.punctuation), size=12))
     return username, password
 
+
 def add_user_with_keys(pub_key, sec_key):
-    """Add a new user with generated username and password."""
+    """Add a new user with generated username and password.
+
+    Args:
+        pub_key (str): The public key associated with the user.
+        sec_key (str): The secret key associated with the user.
+
+    Returns:
+        tuple: A tuple containing the generated username and password.
+    """
     try:
         username, password = generate_username_password()
         expiry_date = datetime.now() + timedelta(days=30)
@@ -215,6 +249,7 @@ def add_user_with_keys(pub_key, sec_key):
         session.rollback()
         return None, None
 
+
 def delete_expired_users():
     """Delete users whose expiry date has passed."""
     try:
@@ -227,8 +262,17 @@ def delete_expired_users():
         logging.error(f"Error deleting expired users: {e}")
         session.rollback()
 
+
 def check_user_credentials(username, password):
-    """Check if the provided username and password are valid."""
+    """Check if the provided username and password are valid.
+
+    Args:
+        username (str): The username to check.
+        password (str): The password to check.
+
+    Returns:
+        bool: True if the credentials are valid, False otherwise.
+    """
     try:
         user = session.query(User).filter(User.username == username).first()
         if user and decrypt_data(user.password_hash) == password:
@@ -246,6 +290,7 @@ def check_user_credentials(username, password):
         logging.error(f"Error checking credentials for user {username}: {e}")
         return False
 
+
 def install_packages():
     """Install required packages."""
     for package in REQUIRED_PACKAGES:
@@ -258,6 +303,7 @@ def install_packages():
             logging.info(f"{package} has been installed.")
         except Exception as e:
             logging.error(f"Error installing {package}: {e}")
+
 
 def get_keys_from_telegram():
     """Get PUB_KEY and SEC_KEY from Telegram bot."""
@@ -290,8 +336,13 @@ def get_keys_from_telegram():
         logging.error(f"Error in Telegram bot polling: {e}")
         raise
 
+
 def build_custom_ocr_model():
-    """Build a custom OCR model using TensorFlow."""
+    """Build a custom OCR model using TensorFlow.
+
+    Returns:
+        tf.keras.Model: The compiled OCR model.
+    """
     input_image = layers.Input(shape=(64, 128, 1), name='input_image')
     x = layers.Conv2D(32, (3, 3), activation='relu', padding='same')(input_image)
     x = layers.MaxPooling2D((2, 2))(x)
@@ -305,8 +356,17 @@ def build_custom_ocr_model():
     model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
     return model
 
+
 def extract_text_with_custom_ocr(image_path, model):
-    """Extract text from an image using a custom OCR model."""
+    """Extract text from an image using a custom OCR model.
+
+    Args:
+        image_path (str): The path to the image file.
+        model (tf.keras.Model): The OCR model to use for text extraction.
+
+    Returns:
+        str: The extracted text.
+    """
     try:
         img = Image.open(image_path).convert('L')
         img = img.resize((128, 64))
@@ -320,16 +380,34 @@ def extract_text_with_custom_ocr(image_path, model):
         logging.error(f"Error extracting text with custom OCR: {e}")
         return None
 
+
 def decode_prediction(prediction):
-    """Decode the prediction from the custom OCR model."""
+    """Decode the prediction from the custom OCR model.
+
+    Args:
+        prediction (np.array): The prediction output from the OCR model.
+
+    Returns:
+        str: The decoded text.
+    """
     characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     text = ""
     for i in range(prediction.shape[1]):
         text += characters[np.argmax(prediction[0, i])]
     return text
 
+
 def translate_text(text, src_lang='auto', dest_lang='en'):
-    """Translate text from one language to another using Google Translate."""
+    """Translate text from one language to another using Google Translate.
+
+    Args:
+        text (str): The text to translate.
+        src_lang (str): The source language code (default is 'auto').
+        dest_lang (str): The destination language code (default is 'en').
+
+    Returns:
+        str: The translated text.
+    """
     try:
         translator = Translator()
         translation = translator.translate(text, src=src_lang, dest=dest_lang)
@@ -338,8 +416,19 @@ def translate_text(text, src_lang='auto', dest_lang='en'):
         logging.error(f"Error translating text: {e}")
         return None
 
+
 def process_file(file_path, lang='eng', translate=False, dest_lang='en'):
-    """Process a file based on its extension with OCR and translation support."""
+    """Process a file based on its extension with OCR and translation support.
+
+    Args:
+        file_path (str): The path to the file to process.
+        lang (str): The language for OCR (default is 'eng').
+        translate (bool): Whether to translate the extracted text (default is False).
+        dest_lang (str): The destination language for translation (default is 'en').
+
+    Returns:
+        str or dict: The processed data, depending on the file type.
+    """
     if file_path.endswith('.sql'):
         return read_sql_file(file_path)
     elif file_path.endswith('.txt'):
@@ -360,8 +449,16 @@ def process_file(file_path, lang='eng', translate=False, dest_lang='en'):
         logging.error(f"Unsupported file format: {file_path}")
         return None
 
+
 def read_sql_file(file_path):
-    """Read data from an SQL file."""
+    """Read data from an SQL file.
+
+    Args:
+        file_path (str): The path to the SQL file.
+
+    Returns:
+        dict: A dictionary containing the data from the SQL file.
+    """
     try:
         conn = sqlite3.connect(file_path)
         cursor = conn.cursor()
@@ -379,8 +476,16 @@ def read_sql_file(file_path):
         logging.error(f"Error reading SQL file: {e}")
         return None
 
+
 def read_text_file(file_path):
-    """Read data from a text file."""
+    """Read data from a text file.
+
+    Args:
+        file_path (str): The path to the text file.
+
+    Returns:
+        str: The content of the text file.
+    """
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             text = f.read()
@@ -389,8 +494,16 @@ def read_text_file(file_path):
         logging.error(f"Error reading text file: {e}")
         return None
 
+
 def read_csv_file(file_path):
-    """Read data from a CSV file."""
+    """Read data from a CSV file.
+
+    Args:
+        file_path (str): The path to the CSV file.
+
+    Returns:
+        list: A list of dictionaries containing the data from the CSV file.
+    """
     try:
         df = pd.read_csv(file_path)
         return df.to_dict(orient='records')
@@ -398,8 +511,16 @@ def read_csv_file(file_path):
         logging.error(f"Error reading CSV file: {e}")
         return None
 
+
 def read_excel_file(file_path):
-    """Read data from an Excel file."""
+    """Read data from an Excel file.
+
+    Args:
+        file_path (str): The path to the Excel file.
+
+    Returns:
+        list: A list of dictionaries containing the data from the Excel file.
+    """
     try:
         df = pd.read_excel(file_path)
         return df.to_dict(orient='records')
@@ -407,8 +528,16 @@ def read_excel_file(file_path):
         logging.error(f"Error reading Excel file: {e}")
         return None
 
+
 def read_json_file(file_path):
-    """Read data from a JSON file."""
+    """Read data from a JSON file.
+
+    Args:
+        file_path (str): The path to the JSON file.
+
+    Returns:
+        dict: A dictionary containing the data from the JSON file.
+    """
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -417,8 +546,16 @@ def read_json_file(file_path):
         logging.error(f"Error reading JSON file: {e}")
         return None
 
+
 def read_proxy_list(file_path):
-    """Read a list of proxies from a text file."""
+    """Read a list of proxies from a text file.
+
+    Args:
+        file_path (str): The path to the text file containing proxies.
+
+    Returns:
+        list: A list of proxies.
+    """
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             proxies = f.read().splitlines()
@@ -427,8 +564,16 @@ def read_proxy_list(file_path):
         logging.error(f"Error reading proxy list from file: {e}")
         return []
 
+
 def setup_driver(proxy=None):
-    """Set up and configure the Selenium WebDriver."""
+    """Set up and configure the Selenium WebDriver.
+
+    Args:
+        proxy (str): The proxy to use for the WebDriver (default is None).
+
+    Returns:
+        webdriver.Chrome: The configured WebDriver instance.
+    """
     try:
         service = Service(CHROME_DRIVER_PATH)
         options = webdriver.ChromeOptions()
@@ -455,8 +600,14 @@ def setup_driver(proxy=None):
         logging.error(f"Error setting up WebDriver: {e}")
         raise
 
+
 def login_to_telegram(driver, phone_number):
-    """Log in to Telegram using the provided phone number."""
+    """Log in to Telegram using the provided phone number.
+
+    Args:
+        driver (webdriver.Chrome): The WebDriver instance.
+        phone_number (str): The phone number to use for login.
+    """
     try:
         driver.get(TELEGRAM_WEB_URL)
         WebDriverWait(driver, 10).until(
@@ -474,8 +625,21 @@ def login_to_telegram(driver, phone_number):
         logging.error(f"Error logging into Telegram: {e}")
         raise
 
+
 def search_telegram(driver, username, keywords, start_date, end_date, max_results):
-    """Search Telegram for messages from a specific user."""
+    """Search Telegram for messages from a specific user.
+
+    Args:
+        driver (webdriver.Chrome): The WebDriver instance.
+        username (str): The username of the Telegram user to search.
+        keywords (list): List of keywords to filter messages.
+        start_date (str): Start date for filtering messages (format: YYYY-MM-DD).
+        end_date (str): End date for filtering messages (format: YYYY-MM-DD).
+        max_results (int): Maximum number of messages to retrieve.
+
+    Returns:
+        list: A list of dictionaries containing message details.
+    """
     try:
         search_box = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.XPATH, '//input[@placeholder="Search"]'))
@@ -541,8 +705,20 @@ def search_telegram(driver, username, keywords, start_date, end_date, max_result
         logging.error(f"Error searching Telegram for user {username}: {e}")
         raise
 
+
 def search_twitter(username, keywords, start_date, end_date, max_results):
-    """Search Twitter for tweets from a specific user."""
+    """Search Twitter for tweets from a specific user.
+
+    Args:
+        username (str): The username of the Twitter user to search.
+        keywords (list): List of keywords to filter tweets.
+        start_date (str): Start date for filtering tweets (format: YYYY-MM-DD).
+        end_date (str): End date for filtering tweets (format: YYYY-MM-DD).
+        max_results (int): Maximum number of tweets to retrieve.
+
+    Returns:
+        list: A list of dictionaries containing tweet details.
+    """
     try:
         driver = setup_driver()
         driver.get(f"{TWITTER_URL}{username}")
@@ -592,8 +768,20 @@ def search_twitter(username, keywords, start_date, end_date, max_results):
     finally:
         driver.quit()
 
+
 def search_instagram(username, keywords, start_date, end_date, max_results):
-    """Search Instagram for posts from a specific user."""
+    """Search Instagram for posts from a specific user.
+
+    Args:
+        username (str): The username of the Instagram user to search.
+        keywords (list): List of keywords to filter posts.
+        start_date (str): Start date for filtering posts (format: YYYY-MM-DD).
+        end_date (str): End date for filtering posts (format: YYYY-MM-DD).
+        max_results (int): Maximum number of posts to retrieve.
+
+    Returns:
+        list: A list of dictionaries containing post details.
+    """
     try:
         driver = setup_driver()
         driver.get(f"{INSTAGRAM_URL}{username}")
@@ -642,8 +830,20 @@ def search_instagram(username, keywords, start_date, end_date, max_results):
     finally:
         driver.quit()
 
+
 def search_facebook(username, keywords, start_date, end_date, max_results):
-    """Search Facebook for posts from a specific user."""
+    """Search Facebook for posts from a specific user.
+
+    Args:
+        username (str): The username of the Facebook user to search.
+        keywords (list): List of keywords to filter posts.
+        start_date (str): Start date for filtering posts (format: YYYY-MM-DD).
+        end_date (str): End date for filtering posts (format: YYYY-MM-DD).
+        max_results (int): Maximum number of posts to retrieve.
+
+    Returns:
+        list: A list of dictionaries containing post details.
+    """
     try:
         driver = setup_driver()
         driver.get(f"{FACEBOOK_URL}{username}")
@@ -691,8 +891,20 @@ def search_facebook(username, keywords, start_date, end_date, max_results):
     finally:
         driver.quit()
 
+
 def search_linkedin(username, keywords, start_date, end_date, max_results):
-    """Search LinkedIn for posts from a specific user."""
+    """Search LinkedIn for posts from a specific user.
+
+    Args:
+        username (str): The username of the LinkedIn user to search.
+        keywords (list): List of keywords to filter posts.
+        start_date (str): Start date for filtering posts (format: YYYY-MM-DD).
+        end_date (str): End date for filtering posts (format: YYYY-MM-DD).
+        max_results (int): Maximum number of posts to retrieve.
+
+    Returns:
+        list: A list of dictionaries containing post details.
+    """
     try:
         driver = setup_driver()
         driver.get(f"{LINKEDIN_URL}in/{username}")
@@ -703,7 +915,8 @@ def search_linkedin(username, keywords, start_date, end_date, max_results):
         post_elements = driver.find_elements(By.XPATH, '//div[contains(@class, "feed-shared-update-v2")]')
         for element in post_elements:
             try:
-                text = element.find_element(By.XPATH, './/div[contains(@class, "feed-shared-update-v2__description")]').text
+                text = element.find_element(By.XPATH,
+                                            './/div[contains(@class, "feed-shared-update-v2__description")]').text
                 post_date = datetime.now()
 
                 if start_date and end_date:
@@ -740,8 +953,20 @@ def search_linkedin(username, keywords, start_date, end_date, max_results):
     finally:
         driver.quit()
 
+
 def search_reddit(username, keywords, start_date, end_date, max_results):
-    """Search Reddit for posts from a specific user."""
+    """Search Reddit for posts from a specific user.
+
+    Args:
+        username (str): The username of the Reddit user to search.
+        keywords (list): List of keywords to filter posts.
+        start_date (str): Start date for filtering posts (format: YYYY-MM-DD).
+        end_date (str): End date for filtering posts (format: YYYY-MM-DD).
+        max_results (int): Maximum number of posts to retrieve.
+
+    Returns:
+        list: A list of dictionaries containing post details.
+    """
     try:
         driver = setup_driver()
         driver.get(f"{REDDIT_URL}user/{username}")
@@ -789,8 +1014,20 @@ def search_reddit(username, keywords, start_date, end_date, max_results):
     finally:
         driver.quit()
 
+
 def search_google(username, keywords, start_date, end_date, max_results):
-    """Search Google for results related to a specific user."""
+    """Search Google for results related to a specific user.
+
+    Args:
+        username (str): The username to search for on Google.
+        keywords (list): List of keywords to filter results.
+        start_date (str): Start date for filtering results (format: YYYY-MM-DD).
+        end_date (str): End date for filtering results (format: YYYY-MM-DD).
+        max_results (int): Maximum number of results to retrieve.
+
+    Returns:
+        list: A list of dictionaries containing search result details.
+    """
     try:
         driver = setup_driver()
         driver.get(f"{GOOGLE_SEARCH_URL}{username}")
@@ -839,8 +1076,20 @@ def search_google(username, keywords, start_date, end_date, max_results):
     finally:
         driver.quit()
 
+
 def search_google_scholar(username, keywords, start_date, end_date, max_results):
-    """Search Google Scholar for results related to a specific user."""
+    """Search Google Scholar for results related to a specific user.
+
+    Args:
+        username (str): The username to search for on Google Scholar.
+        keywords (list): List of keywords to filter results.
+        start_date (str): Start date for filtering results (format: YYYY-MM-DD).
+        end_date (str): End date for filtering results (format: YYYY-MM-DD).
+        max_results (int): Maximum number of results to retrieve.
+
+    Returns:
+        list: A list of dictionaries containing search result details.
+    """
     try:
         driver = setup_driver()
         driver.get(f"{GOOGLE_SCHOLAR_URL}{username}")
@@ -889,8 +1138,20 @@ def search_google_scholar(username, keywords, start_date, end_date, max_results)
     finally:
         driver.quit()
 
+
 def search_public_databases(username, keywords, start_date, end_date, max_results):
-    """Search public databases for information related to a specific user."""
+    """Search public databases for information related to a specific user.
+
+    Args:
+        username (str): The username to search for in public databases.
+        keywords (list): List of keywords to filter results.
+        start_date (str): Start date for filtering results (format: YYYY-MM-DD).
+        end_date (str): End date for filtering results (format: YYYY-MM-DD).
+        max_results (int): Maximum number of results to retrieve.
+
+    Returns:
+        list: A list of dictionaries containing database entry details.
+    """
     try:
         results = []
         # Example: Search in a public database (e.g., a government database)
@@ -912,8 +1173,20 @@ def search_public_databases(username, keywords, start_date, end_date, max_result
         logging.error(f"Error searching public databases for user {username}: {e}")
         return []
 
+
 def search_private_databases(username, keywords, start_date, end_date, max_results):
-    """Search private databases for information related to a specific user."""
+    """Search private databases for information related to a specific user.
+
+    Args:
+        username (str): The username to search for in private databases.
+        keywords (list): List of keywords to filter results.
+        start_date (str): Start date for filtering results (format: YYYY-MM-DD).
+        end_date (str): End date for filtering results (format: YYYY-MM-DD).
+        max_results (int): Maximum number of results to retrieve.
+
+    Returns:
+        list: A list of dictionaries containing database entry details.
+    """
     try:
         results = []
         # Example: Search in a private database (e.g., a corporate database)
@@ -935,8 +1208,20 @@ def search_private_databases(username, keywords, start_date, end_date, max_resul
         logging.error(f"Error searching private databases for user {username}: {e}")
         return []
 
+
 def search_email(email, keywords, start_date, end_date, max_results):
-    """Search for information related to a specific email address."""
+    """Search for information related to a specific email address.
+
+    Args:
+        email (str): The email address to search for.
+        keywords (list): List of keywords to filter results.
+        start_date (str): Start date for filtering results (format: YYYY-MM-DD).
+        end_date (str): End date for filtering results (format: YYYY-MM-DD).
+        max_results (int): Maximum number of results to retrieve.
+
+    Returns:
+        list: A list of dictionaries containing email entry details.
+    """
     try:
         results = []
         # Example: Search for email in public databases or social media
@@ -958,8 +1243,20 @@ def search_email(email, keywords, start_date, end_date, max_results):
         logging.error(f"Error searching for email {email}: {e}")
         return []
 
+
 def search_user_id(user_id, keywords, start_date, end_date, max_results):
-    """Search for information related to a specific user ID."""
+    """Search for information related to a specific user ID.
+
+    Args:
+        user_id (str): The user ID to search for.
+        keywords (list): List of keywords to filter results.
+        start_date (str): Start date for filtering results (format: YYYY-MM-DD).
+        end_date (str): End date for filtering results (format: YYYY-MM-DD).
+        max_results (int): Maximum number of results to retrieve.
+
+    Returns:
+        list: A list of dictionaries containing user ID entry details.
+    """
     try:
         results = []
         # Example: Search for user ID in public databases or social media
@@ -981,8 +1278,20 @@ def search_user_id(user_id, keywords, start_date, end_date, max_results):
         logging.error(f"Error searching for user ID {user_id}: {e}")
         return []
 
+
 def search_national_id(national_id, keywords, start_date, end_date, max_results):
-    """Search for information related to a specific national ID."""
+    """Search for information related to a specific national ID.
+
+    Args:
+        national_id (str): The national ID to search for.
+        keywords (list): List of keywords to filter results.
+        start_date (str): Start date for filtering results (format: YYYY-MM-DD).
+        end_date (str): End date for filtering results (format: YYYY-MM-DD).
+        max_results (int): Maximum number of results to retrieve.
+
+    Returns:
+        list: A list of dictionaries containing national ID entry details.
+    """
     try:
         results = []
         # Example: Search for national ID in public databases
@@ -1004,8 +1313,20 @@ def search_national_id(national_id, keywords, start_date, end_date, max_results)
         logging.error(f"Error searching for national ID {national_id}: {e}")
         return []
 
+
 def search_passport_number(passport_number, keywords, start_date, end_date, max_results):
-    """Search for information related to a specific passport number."""
+    """Search for information related to a specific passport number.
+
+    Args:
+        passport_number (str): The passport number to search for.
+        keywords (list): List of keywords to filter results.
+        start_date (str): Start date for filtering results (format: YYYY-MM-DD).
+        end_date (str): End date for filtering results (format: YYYY-MM-DD).
+        max_results (int): Maximum number of results to retrieve.
+
+    Returns:
+        list: A list of dictionaries containing passport number entry details.
+    """
     try:
         results = []
         # Example: Search for passport number in public databases
@@ -1027,8 +1348,20 @@ def search_passport_number(passport_number, keywords, start_date, end_date, max_
         logging.error(f"Error searching for passport number {passport_number}: {e}")
         return []
 
+
 def search_account_number(account_number, keywords, start_date, end_date, max_results):
-    """Search for information related to a specific account number."""
+    """Search for information related to a specific account number.
+
+    Args:
+        account_number (str): The account number to search for.
+        keywords (list): List of keywords to filter results.
+        start_date (str): Start date for filtering results (format: YYYY-MM-DD).
+        end_date (str): End date for filtering results (format: YYYY-MM-DD).
+        max_results (int): Maximum number of results to retrieve.
+
+    Returns:
+        list: A list of dictionaries containing account number entry details.
+    """
     try:
         results = []
         # Example: Search for account number in public databases
@@ -1050,8 +1383,20 @@ def search_account_number(account_number, keywords, start_date, end_date, max_re
         logging.error(f"Error searching for account number {account_number}: {e}")
         return []
 
+
 def search_image(image_path, keywords, start_date, end_date, max_results):
-    """Search for information related to a specific image."""
+    """Search for information related to a specific image.
+
+    Args:
+        image_path (str): The path to the image file to search for.
+        keywords (list): List of keywords to filter results.
+        start_date (str): Start date for filtering results (format: YYYY-MM-DD).
+        end_date (str): End date for filtering results (format: YYYY-MM-DD).
+        max_results (int): Maximum number of results to retrieve.
+
+    Returns:
+        list: A list of dictionaries containing image entry details.
+    """
     try:
         results = []
         # Example: Search for image in public databases or reverse image search
@@ -1073,8 +1418,20 @@ def search_image(image_path, keywords, start_date, end_date, max_results):
         logging.error(f"Error searching for image {image_path}: {e}")
         return []
 
+
 def search_audio(audio_path, keywords, start_date, end_date, max_results):
-    """Search for information related to a specific audio file."""
+    """Search for information related to a specific audio file.
+
+    Args:
+        audio_path (str): The path to the audio file to search for.
+        keywords (list): List of keywords to filter results.
+        start_date (str): Start date for filtering results (format: YYYY-MM-DD).
+        end_date (str): End date for filtering results (format: YYYY-MM-DD).
+        max_results (int): Maximum number of results to retrieve.
+
+    Returns:
+        list: A list of dictionaries containing audio entry details.
+    """
     try:
         results = []
         # Example: Search for audio in public databases or audio recognition
@@ -1096,8 +1453,16 @@ def search_audio(audio_path, keywords, start_date, end_date, max_results):
         logging.error(f"Error searching for audio {audio_path}: {e}")
         return []
 
+
 def extract_metadata(file_path):
-    """Extract metadata from a file."""
+    """Extract metadata from a file.
+
+    Args:
+        file_path (str): The path to the file to extract metadata from.
+
+    Returns:
+        dict: A dictionary containing metadata.
+    """
     try:
         if file_path.endswith('.jpg') or file_path.endswith('.jpeg') or file_path.endswith('.png'):
             with open(file_path, 'rb') as f:
@@ -1118,8 +1483,14 @@ def extract_metadata(file_path):
         logging.error(f"Error extracting metadata from file {file_path}: {e}")
         return None
 
+
 def save_to_database(data, username):
-    """Save data to the SQLite database."""
+    """Save data to the SQLite database.
+
+    Args:
+        data (list): A list of dictionaries containing data to save.
+        username (str): The username associated with the data.
+    """
     try:
         for item in data:
             scraped_data = ScrapedData(
@@ -1138,8 +1509,14 @@ def save_to_database(data, username):
         logging.error(f"Error saving data to database for user {username}: {e}")
         raise
 
+
 def save_to_txt(data, username):
-    """Save data to a text file."""
+    """Save data to a text file.
+
+    Args:
+        data (list): A list of dictionaries containing data to save.
+        username (str): The username associated with the data.
+    """
     try:
         user_folder = os.path.join(OUTPUT_FOLDER, username)
         os.makedirs(user_folder, exist_ok=True)
@@ -1158,8 +1535,14 @@ def save_to_txt(data, username):
         logging.error(f"Error saving data to text file for user {username}: {e}")
         raise
 
+
 def save_to_csv(data, username):
-    """Save data to a CSV file."""
+    """Save data to a CSV file.
+
+    Args:
+        data (list): A list of dictionaries containing data to save.
+        username (str): The username associated with the data.
+    """
     try:
         user_folder = os.path.join(OUTPUT_FOLDER, username)
         os.makedirs(user_folder, exist_ok=True)
@@ -1170,8 +1553,14 @@ def save_to_csv(data, username):
         logging.error(f"Error saving data to CSV file for user {username}: {e}")
         raise
 
+
 def save_to_json(data, username):
-    """Save data to a JSON file."""
+    """Save data to a JSON file.
+
+    Args:
+        data (list): A list of dictionaries containing data to save.
+        username (str): The username associated with the data.
+    """
     try:
         user_folder = os.path.join(OUTPUT_FOLDER, username)
         os.makedirs(user_folder, exist_ok=True)
@@ -1182,8 +1571,14 @@ def save_to_json(data, username):
         logging.error(f"Error saving data to JSON file for user {username}: {e}")
         raise
 
+
 def save_to_html(data, username):
-    """Save data to an HTML file."""
+    """Save data to an HTML file.
+
+    Args:
+        data (list): A list of dictionaries containing data to save.
+        username (str): The username associated with the data.
+    """
     try:
         user_folder = os.path.join(OUTPUT_FOLDER, username)
         os.makedirs(user_folder, exist_ok=True)
@@ -1203,8 +1598,14 @@ def save_to_html(data, username):
         logging.error(f"Error saving data to HTML file for user {username}: {e}")
         raise
 
+
 def save_to_excel(data, username):
-    """Save data to an Excel file."""
+    """Save data to an Excel file.
+
+    Args:
+        data (list): A list of dictionaries containing data to save.
+        username (str): The username associated with the data.
+    """
     try:
         user_folder = os.path.join(OUTPUT_FOLDER, username)
         os.makedirs(user_folder, exist_ok=True)
@@ -1215,8 +1616,14 @@ def save_to_excel(data, username):
         logging.error(f"Error saving data to Excel file for user {username}: {e}")
         raise
 
+
 def visualize_data(data, username):
-    """Visualize data using Matplotlib and Seaborn."""
+    """Visualize data using Matplotlib and Seaborn.
+
+    Args:
+        data (list): A list of dictionaries containing data to visualize.
+        username (str): The username associated with the data.
+    """
     try:
         df = pd.DataFrame(data)
         plt.figure(figsize=(10, 6))
@@ -1230,8 +1637,16 @@ def visualize_data(data, username):
     except Exception as e:
         logging.error(f"Error visualizing data for user {username}: {e}")
 
+
 def analyze_sentiment(text):
-    """Analyze sentiment of the text using NLTK."""
+    """Analyze sentiment of the text using NLTK.
+
+    Args:
+        text (str): The text to analyze.
+
+    Returns:
+        dict: A dictionary containing sentiment scores.
+    """
     try:
         sia = SentimentIntensityAnalyzer()
         sentiment = sia.polarity_scores(text)
@@ -1240,19 +1655,26 @@ def analyze_sentiment(text):
         logging.error(f"Error analyzing sentiment: {e}")
         return None
 
+
 def parse_arguments():
-    """Parse command line arguments."""
+    """Parse command line arguments.
+
+    Returns:
+        argparse.Namespace: An object containing the parsed arguments.
+    """
     parser = argparse.ArgumentParser(description='Internet Scraper')
     parser.add_argument('--usernames', type=str, help='Comma-separated list of usernames to search')
     parser.add_argument('--keywords', type=str, help='Comma-separated list of keywords to search')
     parser.add_argument('--start_date', type=str, help='Start date for search (YYYY-MM-DD)')
     parser.add_argument('--end_date', type=str, help='End date for search (YYYY-MM-DD)')
     parser.add_argument('--max_results', type=int, help='Maximum number of results to retrieve')
-    parser.add_argument('--save_formats', type=str, help='Comma-separated list of formats to save data (txt, csv, json, html, xlsx, db)')
+    parser.add_argument('--save_formats', type=str,
+                        help='Comma-separated list of formats to save data (txt, csv, json, html, xlsx, db)')
     parser.add_argument('--proxy', type=str, help='Proxy to use for scraping')
     parser.add_argument('--ocr_lang', type=str, default='eng', help='Language for OCR (e.g., eng, fas, ara, chi_sim)')
     parser.add_argument('--translate', action='store_true', help='Enable translation of extracted text')
-    parser.add_argument('--dest_lang', type=str, default='en', help='Destination language for translation (e.g., en, fa, ar, zh-cn)')
+    parser.add_argument('--dest_lang', type=str, default='en',
+                        help='Destination language for translation (e.g., en, fa, ar, zh-cn)')
     parser.add_argument('--email', type=str, help='Email address to search')
     parser.add_argument('--user_id', type=str, help='User ID to search')
     parser.add_argument('--national_id', type=str, help='National ID to search')
@@ -1262,15 +1684,33 @@ def parse_arguments():
     parser.add_argument('--audio_path', type=str, help='Path to audio file to search')
     return parser.parse_args()
 
+
 def get_proxies(proxy_input):
-    """Get a list of proxies from input or file."""
+    """Get a list of proxies from input or file.
+
+    Args:
+        proxy_input (str): The input containing proxies or a path to a file containing proxies.
+
+    Returns:
+        list: A list of proxies.
+    """
     if proxy_input.endswith('.txt'):
         return read_proxy_list(proxy_input)
     else:
         return [proxy_input]
 
+
 def check_api_keys(public_key, secret_key, username):
-    """Check if the provided API keys are valid by calling the API."""
+    """Check if the provided API keys are valid by calling the API.
+
+    Args:
+        public_key (str): The public key to validate.
+        secret_key (str): The secret key to validate.
+        username (str): The username associated with the keys.
+
+    Returns:
+        bool: True if the keys are valid, False otherwise.
+    """
     if not public_key or not secret_key or not username:
         logging.error("Public key, secret key, or username is missing.")
         return False
@@ -1302,8 +1742,13 @@ def check_api_keys(public_key, secret_key, username):
         logging.error(f"Unexpected error validating API keys: {e}")
         return False
 
+
 def read_admin_code_from_file():
-    """Read the admin code from a file."""
+    """Read the admin code from a file.
+
+    Returns:
+        str: The encrypted admin code.
+    """
     try:
         if not os.path.exists(ADMIN_CODE_FILE):
             logging.error("Admin code file not found.")
@@ -1315,9 +1760,19 @@ def read_admin_code_from_file():
         logging.error(f"Error reading admin code file: {e}")
         return None
 
+
 def verify_code_format(code, username):
-    """Verify the format of the admin code."""
+    """Verify the format of the admin code.
+
+    Args:
+        code (str): The admin code to verify.
+        username (str): The username associated with the code.
+
+    Returns:
+        bool: True if the code format is valid, False otherwise.
+    """
     return code.startswith(username) and len(code) == 32
+
 
 def delete_client_files():
     """Delete client files in case of invalid admin code."""
@@ -1332,8 +1787,16 @@ def delete_client_files():
     except Exception as e:
         logging.error(f"Error deleting client files: {e}")
 
+
 def validate_script_with_api(script_content):
-    """Validate script using the API."""
+    """Validate script using the API.
+
+    Args:
+        script_content (str): The content of the script to validate.
+
+    Returns:
+        tuple: A tuple containing a boolean indicating validity and a message.
+    """
     try:
         response = requests.post(
             BASE_URL,
@@ -1349,6 +1812,7 @@ def validate_script_with_api(script_content):
     except Exception as e:
         logging.error(f"Error validating script with API: {e}")
         return False, "API validation failed."
+
 
 def main():
     try:
@@ -1440,7 +1904,8 @@ def main():
                 if national_id:
                     all_data.extend(search_national_id(national_id, keywords, start_date, end_date, max_results))
                 if passport_number:
-                    all_data.extend(search_passport_number(passport_number, keywords, start_date, end_date, max_results))
+                    all_data.extend(
+                        search_passport_number(passport_number, keywords, start_date, end_date, max_results))
                 if account_number:
                     all_data.extend(search_account_number(account_number, keywords, start_date, end_date, max_results))
                 if image_path:
@@ -1478,6 +1943,7 @@ def main():
                 driver.quit()
     except Exception as e:
         logging.error(f"Error in main execution: {e}")
+
 
 if __name__ == '__main__':
     main()
