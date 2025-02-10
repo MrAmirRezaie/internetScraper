@@ -65,7 +65,7 @@ logging.basicConfig(
 )
 
 # Telegram bot token and API URL
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '8031081459:AAGxY7kF-T-uDbGrc8txnnZhKbdZndkOiWc')
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', 'Token')
 if not TELEGRAM_BOT_TOKEN or ':' not in TELEGRAM_BOT_TOKEN:
     logging.error("Invalid Telegram bot token. Please check your .env file.")
     exit()
